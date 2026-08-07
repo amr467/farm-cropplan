@@ -793,9 +793,8 @@ function drawPrices(el,meta){
    ${staleBanner(PMETA)}
    <div class="card">
     <select class="wide" onchange="priceId=this.value;PSER=null;priceZoom=null;renderPrices()">
-     ${mapped.length?`<optgroup label="Crops">${mapped.map(s=>
-        `<option value="${s.id}" ${s.id===priceId?'selected':''}>${s.name}</option>`).join('')}</optgroup>`:''}
-     <optgroup label="${mapped.length?'Unmapped bulletin items':'Bulletin items'}">
+     ${cropGroups(mapped)}
+     <optgroup label="${mapped.length?'Other bulletin items':'Bulletin items'}">
       ${raw.map(s=>`<option value="${s.id}" ${s.id===priceId?'selected':''}>${s.name} · ${s.days}d</option>`).join('')}
      </optgroup>
     </select>
@@ -821,6 +820,19 @@ function drawPrices(el,meta){
      <span><i style="background:#1f6feb;opacity:.5"></i>low–high band</span></div>
    </div>
 
+   <div class="card"><h3>Key numbers</h3>
+    <div class="why">The things you would otherwise have to read off a chart
+     by eye. Trend is nominal: some of any rise is the dinar, not the crop.</div>
+    ${priceStats().html}
+   </div>
+
+   <div class="card"><h3>Year on year</h3>
+    <div class="why">Every year drawn separately against week of year, newest
+     in amber. The pooled band on the next chart hides whether a season is
+     consistently early or just averaged that way. This does not.</div>
+    ${chartYearOverlay()}
+   </div>
+
    <div class="card"><h3>Season shape</h3>
     <div class="why">All years overlaid by week. Dark band is the middle half
      of observations, light band the 10th to 90th percentile, line the median.
@@ -838,6 +850,18 @@ function drawPrices(el,meta){
      a different fact from a high price on two hundred. This is also where you
      see the glut you would be planting into.</div>
     ${chartArrivals()}
+   </div>
+
+   <div class="card"><h3>Does supply move the price?</h3>
+    <div class="why">Each dot is one week of the year: arrivals against price,
+     coloured by month. A downward cloud means gluts really do cut the price,
+     which is the argument for planting off-peak. A shapeless one means
+     something else drives it and timing your harvest buys you less.</div>
+    ${chartPriceVolume()}
+   </div>
+
+   <div class="card"><h3>Year by year</h3>
+    ${yearTable(priceStats())}
    </div>`;
 }
 
@@ -1011,6 +1035,19 @@ async function renderWeather(){
     ${chartSeasonRain()}
    </div>
 
+   <div class="card"><h3>Key numbers</h3>
+    <div class="why">Frost dates set the planting window; the shortfall between
+     demand and rain is what the well has to cover.</div>
+    ${frostStats()}
+   </div>
+
+   <div class="card"><h3>How a season builds</h3>
+    <div class="why">Cumulative rainfall through the year, one line per season,
+     newest in amber. An annual total tells you a season was dry; this tells
+     you whether it was dry all through or just stopped in February.</div>
+    ${seasonSeries()}
+   </div>
+
    <div class="card"><h3>Frost</h3>
     <div class="why">Nights at or below 0 °C by month, per year on average.
      Reanalysis is a grid-cell average at 2 m, so an open field on a still
@@ -1112,6 +1149,360 @@ function chartFrost(){
   return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(1))+bars,
     {pts:per.map((v,i)=>({k:i,v})),x,y,
      label:p=>`<b>${MONTH[p.k]}</b><br>${p.v.toFixed(1)} frost nights per year`});
+}
+
+/* Varieties are never merged. Eggplant trades as four listings at 20, 40, 40
+   and 50, and a median across them describes no crop anyone grows. The
+   mapping tags each listing with a crop; you pick which one to plan against. */
+function cropLabel(id){
+  const c=CROPS.filter(function(x){return x.id===id;})[0];
+  return c?c.en+' \u00b7 '+c.ar:id;
+}
+function cropGroups(mapped){
+  if(!mapped.length) return '';
+  const by={};
+  mapped.forEach(function(s){ (by[s.crop]=by[s.crop]||[]).push(s); });
+  return Object.keys(by).sort().map(function(cid){
+    const list=by[cid].sort(function(a,b){return b.days-a.days;});
+    return '<optgroup label="'+cropLabel(cid)+'">'+list.map(function(s){
+      return '<option value="'+s.id+'"'+(s.id===priceId?' selected':'')+'>'+
+        s.name+' \u00b7 '+s.days+'d \u00b7 '+fmt(s.median_price)+'</option>';
+    }).join('')+'</optgroup>';
+  }).join('');
+}
+function varietiesOf(cropId){
+  if(!PIDX) return [];
+  return PIDX.series.filter(function(s){return s.crop===cropId;})
+    .sort(function(a,b){return b.days-a.days;});
+}
+
+function varietyCard(){
+  if(!PIDX) return '';
+  const rows=CROPS.filter(function(c){return !c.gap;}).map(function(c){
+    const vs=varietiesOf(c.id);
+    if(!vs.length) return '<div class="row"><label>'+c.en+'</label>'+
+      '<span class="u" style="width:150px">no series</span></div>';
+    if(vs.length===1) return '<div class="row"><label>'+c.en+'</label>'+
+      '<span class="u" style="width:150px;text-align:right">'+vs[0].name+'</span></div>';
+    return '<div class="row"><label>'+c.en+'</label>'+
+      '<select style="width:170px" onchange="setVariety(\''+c.id+'\',this.value)">'+
+      vs.map(function(s){
+        return '<option value="'+s.id+'"'+(settings.priceMap[c.id]===s.id?' selected':'')+'>'+
+          s.name+' \u00b7 '+fmt(s.median_price)+'</option>';
+      }).join('')+'</select></div>';
+  }).join('');
+  return '<div class="card"><h3>Which variety</h3><div class="why">Varieties of '+
+    'the same crop trade at different levels: eggplant runs from 20 to 50, '+
+    'sweet pepper from 40 to 80. The ranking uses whichever you pick here, so '+
+    'it is a real lever, not a label. Defaults to the highest-volume listing, '+
+    'which is the one you are most likely to be competing in.</div>'+rows+'</div>';
+}
+function setVariety(crop,sid){ settings.priceMap[crop]=sid; renderMoney(); }
+
+/* ============================================================ ANALYSIS
+   Statistics and year-on-year views. Each earns its place by answering a
+   question you would otherwise have to eyeball off a chart.               */
+
+function linreg(xs,ys){
+  const n=xs.length; if(n<3) return null;
+  const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let sxy=0,sxx=0,syy=0;
+  for(let i=0;i<n;i++){ const dx=xs[i]-mx, dy=ys[i]-my; sxy+=dx*dy; sxx+=dx*dx; syy+=dy*dy; }
+  if(!sxx) return null;
+  const slope=sxy/sxx;
+  return {slope:slope, intercept:my-slope*mx,
+          r:(sxx&&syy)?sxy/Math.sqrt(sxx*syy):0};
+}
+function corr(xs,ys){ const l=linreg(xs,ys); return l?l.r:null; }
+
+function yearColour(y,years){
+  const i=years.indexOf(y), n=Math.max(1,years.length-1);
+  const h=200-140*(i/n);                 // blue for old, amber for recent
+  return `hsl(${h},70%,${45+18*(i/n)}%)`;
+}
+function statGrid(items){
+  return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;background:var(--bdr);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">'+
+    items.map(function(it){
+      return '<div style="background:var(--sur2);padding:8px 9px">'+
+        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx3)">'+it[0]+'</div>'+
+        '<div style="font-size:15px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;color:'+(it[2]||'var(--tx)')+'">'+it[1]+'</div>'+
+        (it[3]?'<div style="font-size:9px;color:var(--tx3);margin-top:1px">'+it[3]+'</div>':'')+
+      '</div>';
+    }).join('')+'</div>';
+}
+
+/* ---- price: weekly rows regrouped into calendar years ---- */
+function byYear(weekly){
+  const out={};
+  weekly.forEach(function(w){
+    const t=w[0]*WEEK, d=new Date(t), Y=d.getUTCFullYear();
+    const woy=Math.min(52,Math.floor((t-Date.UTC(Y,0,1))/WEEK));
+    (out[Y]=out[Y]||[]).push({woy:woy,v:w[1],q:w[4],n:w[5]});
+  });
+  Object.keys(out).forEach(function(y){ out[y].sort(function(a,b){return a.woy-b.woy;}); });
+  return out;
+}
+
+function priceStats(){
+  const wk=PSER.weekly, ys=byYear(wk);
+  const years=Object.keys(ys).map(Number).sort();
+  const vals=wk.map(function(w){return w[1];}).filter(function(v){return v!=null;});
+  const med=median(vals), p25=quantile(vals,.25), p75=quantile(vals,.75);
+
+  // typical week-to-week move, as a share of level. Uses the median so one
+  // surviving typo does not set the number.
+  const moves=[];
+  for(let i=1;i<wk.length;i++){
+    if(wk[i][0]-wk[i-1][0]!==1) continue;
+    if(!wk[i-1][1]) continue;
+    moves.push(Math.abs(wk[i][1]-wk[i-1][1])/wk[i-1][1]);
+  }
+  const vol=median(moves);
+
+  // seasonal amplitude from the pooled profile
+  const s=PSER.seasonal||[];
+  let peak=null,trough=null;
+  s.forEach(function(r){
+    if(!peak||r[3]>peak[3]) peak=r;
+    if(!trough||r[3]<trough[3]) trough=r;
+  });
+
+  // trend on annual medians
+  const annual=years.map(function(y){
+    return {y:y, m:median(ys[y].map(function(o){return o.v;})),
+            q:ys[y].reduce(function(a,o){return a+(o.q||0);},0)};
+  }).filter(function(a){return ys[a.y].length>=30;});
+  const tr=linreg(annual.map(function(a){return a.y;}),
+                  annual.map(function(a){return a.m;}));
+  const trendPct=(tr&&med)?100*tr.slope/med:null;
+
+  // does volume actually move price? on the seasonal profile, logs.
+  const pv=s.filter(function(r){return r[3]>0&&r[6]>0;});
+  const rho=pv.length>8?corr(pv.map(function(r){return Math.log(r[6]);}),
+                             pv.map(function(r){return Math.log(r[3]);})):null;
+
+  // latest week against its own historical norm
+  const last=wk[wk.length-1];
+  const lastT=last[0]*WEEK, lastD=new Date(lastT);
+  const lastWoy=Math.min(52,Math.floor((lastT-Date.UTC(lastD.getUTCFullYear(),0,1))/WEEK));
+  const norm=s.filter(function(r){return r[0]===lastWoy;})[0];
+  const vsNorm=(norm&&norm[3])?100*(last[1]-norm[3])/norm[3]:null;
+
+  const U=settings.unitsPerJD==1000?'fils':'piastres';
+  return {years:years, annual:annual, html:
+   statGrid([
+    ['Median price', fmt(med)+' <span class="u">'+U+'</span>', null,
+     'middle half '+fmt(p25)+'\u2013'+fmt(p75)],
+    ['Typical weekly move', vol!=null?(100*vol).toFixed(1)+'%':'\u2014', null,
+     'median absolute change'],
+    ['Season swing', (peak&&trough&&trough[3])?(peak[3]/trough[3]).toFixed(1)+'\u00d7':'\u2014',
+     null, peak?'peak wk '+(peak[0]+1)+', low wk '+(trough[0]+1):''],
+    ['Trend', trendPct!=null?(trendPct>0?'+':'')+trendPct.toFixed(1)+'%/yr':'\u2014',
+     trendPct==null?null:(trendPct>0?'var(--warn)':'var(--info)'),
+     'nominal, not inflation adjusted'],
+    ['Price vs arrivals', rho!=null?rho.toFixed(2):'\u2014',
+     rho!=null&&rho<-0.4?'var(--ok)':null,
+     rho==null?'':(rho<-0.4?'more supply, lower price':
+                   rho>0.4?'moves together, so season drives both':'weak link')],
+    ['Latest vs its norm', vsNorm!=null?(vsNorm>0?'+':'')+vsNorm.toFixed(0)+'%':'\u2014',
+     vsNorm==null?null:(vsNorm>0?'var(--ok)':'var(--err)'),
+     'week '+(lastWoy+1)+' against 11 years'],
+   ])};
+}
+
+function chartYearOverlay(){
+  const ys=byYear(PSER.weekly);
+  const years=Object.keys(ys).map(Number).sort();
+  if(years.length<2) return '<div class="why">Not enough years.</div>';
+  const shown=years.filter(function(y){return ys[y].length>=20;});
+  if(!shown.length) return '<div class="why">No year has enough coverage.</div>';
+  let yh=0;
+  shown.forEach(function(y){ ys[y].forEach(function(o){ if(o.v>yh) yh=o.v; }); });
+  yh*=1.06;
+  const x=scale(0,52,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const newest=shown[shown.length-1];
+  const paths=shown.map(function(Y){
+    const d=ys[Y].map(function(o,i){return (i?'L':'M')+x(o.woy)+','+y(o.v);}).join('');
+    const cur=Y===newest;
+    return '<path d="'+d+'" fill="none" stroke="'+yearColour(Y,shown)+
+      '" stroke-width="'+(cur?2.4:1.1)+'" opacity="'+(cur?1:.55)+'"/>';
+  }).join('');
+  const pts=[];
+  for(let w=0;w<=52;w++){
+    const all={};
+    shown.forEach(function(Y){
+      const hit=ys[Y].filter(function(o){return o.woy===w;})[0];
+      if(hit) all[Y]=hit.v;
+    });
+    if(Object.keys(all).length) pts.push({k:w,v:all[newest]!=null?all[newest]:null,all:all});
+  }
+  const legend='<div class="legend">'+shown.map(function(Y){
+    return '<span><i style="background:'+yearColour(Y,shown)+'"></i>'+Y+'</span>';
+  }).join('')+'</div>';
+  return svg(axes(x,y,0,yh,MONTH.map(function(l,i){return {v:i*52/12+2,l:l};}))+paths,
+    {pts:pts,x:x,y:y,label:function(p){
+      const d=new Date(Date.UTC(2001,0,1+p.k*7));
+      const rows=Object.keys(p.all).sort().reverse().slice(0,12).map(function(Y){
+        return '<span style="color:'+yearColour(+Y,shown)+'">'+Y+'</span> '+fmt(p.all[Y]);
+      }).join('<br>');
+      return '<b>week '+(p.k+1)+' \u00b7 '+MONTH[d.getUTCMonth()]+'</b><br>'+rows;
+    }})+legend;
+}
+
+function chartPriceVolume(){
+  const s=(PSER.seasonal||[]).filter(function(r){return r[3]>0&&r[6]>0;});
+  if(s.length<10) return '<div class="why">Not enough paired data.</div>';
+  const qs=s.map(function(r){return r[6];}), ps=s.map(function(r){return r[3];});
+  const xh=Math.max.apply(null,qs)*1.08, yh=Math.max.apply(null,ps)*1.08;
+  const x=scale(0,xh,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const dots=s.map(function(r){
+    const d=new Date(Date.UTC(2001,0,1+r[0]*7));
+    return '<circle cx="'+x(r[6])+'" cy="'+y(r[3])+'" r="4" fill="'+
+      'hsl('+(d.getUTCMonth()*30)+',65%,55%)" opacity=".8"/>';
+  }).join('');
+  const l=linreg(qs,ps);
+  const fit=l?'<line x1="'+x(0)+'" y1="'+y(l.intercept)+'" x2="'+x(xh)+
+    '" y2="'+y(l.intercept+l.slope*xh)+'" stroke="#8b949e" stroke-dasharray="5,4"/>':'';
+  const xt=niceTicks(0,xh,5).map(function(v){return {v:v,l:fmt(v)};});
+  return svg(axes(x,y,0,yh,xt)+fit+dots,
+    {pts:s.map(function(r){return {k:r[6],v:r[3],w:r[0]};}),x:x,y:y,
+     label:function(p){
+       const d=new Date(Date.UTC(2001,0,1+p.w*7));
+       return '<b>week '+(p.w+1)+' \u00b7 '+MONTH[d.getUTCMonth()]+'</b><br>'+
+         fmt(p.k,1)+' t/day at '+fmt(p.v);
+     }});
+}
+
+function yearTable(st){
+  if(!st.annual.length) return '';
+  const U=settings.unitsPerJD==1000?'fils':'piastres';
+  const rows=st.annual.map(function(a,i){
+    const prev=i?st.annual[i-1].m:null;
+    const ch=prev?100*(a.m-prev)/prev:null;
+    return '<div class="kv"><span class="k">'+a.y+'</span>'+
+      '<span class="v" style="font-size:13px">'+fmt(a.m)+
+      (ch!=null?' <span class="u" style="color:'+(ch>0?'var(--ok)':'var(--err)')+'">'+
+        (ch>0?'+':'')+ch.toFixed(0)+'%</span>':'')+
+      ' <span class="u">| '+fmt(a.q,0)+' t</span></span></div>';
+  }).join('');
+  return '<div class="out">'+rows+'</div><div class="note">Median price in '+U+
+    '/kg, change on the year before, and total arrivals. Nominal, so some of '+
+    'any rise is currency rather than crop.</div>';
+}
+
+/* ============================================================ WEATHER ANALYSIS */
+function seasonSeries(){
+  /* Cumulative rainfall through the hydrological year, one line per season.
+     This is the view that answers "how is this season tracking", which no
+     single-number annual total can. */
+  const bySeason={};
+  WX.daily.forEach(function(r){
+    if(!r[5]) return;
+    const dt=new Date(r[0]*DAY), Y=dt.getUTCFullYear(), M=dt.getUTCMonth()+1;
+    const s=M>=10?Y:Y-1;
+    const start=Date.UTC(s,9,1);
+    const day=Math.floor((r[0]*DAY-start)/DAY);
+    if(day<0||day>365) return;
+    (bySeason[s]=bySeason[s]||[]).push([day,r[3]]);
+  });
+  const seasons=Object.keys(bySeason).map(Number).sort();
+  const good=seasons.filter(function(s){return bySeason[s].length>=340;});
+  if(good.length<3) return '<div class="why">Not enough complete seasons.</div>';
+  const cum={};
+  let yh=0;
+  good.forEach(function(s){
+    bySeason[s].sort(function(a,b){return a[0]-b[0];});
+    let t=0; cum[s]=bySeason[s].map(function(p){ t+=p[1]; return [p[0],t]; });
+    if(t>yh) yh=t;
+  });
+  yh*=1.06;
+  const x=scale(0,365,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const newest=good[good.length-1];
+  const paths=good.map(function(s){
+    /* Weekly points only. Daily gave ~10,000 path commands across 29
+       seasons, which is a third of a megabyte of SVG on a phone. Cumulative
+       rain is monotonic and smooth, so weekly loses nothing visible. */
+    const d=cum[s].filter(function(_,i){return i%7===0||i===cum[s].length-1;})
+      .map(function(p,i){return (i?'L':'M')+x(p[0])+','+y(p[1]);}).join('');
+    const cur=s===newest;
+    return '<path d="'+d+'" fill="none" stroke="'+yearColour(s,good)+
+      '" stroke-width="'+(cur?2.4:1)+'" opacity="'+(cur?1:.5)+'"/>';
+  }).join('');
+  const lbl=['Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep'];
+  const xt=lbl.map(function(l,i){return {v:i*30.4+14,l:l};});
+  const pts=[];
+  for(let day=0;day<=365;day+=7){
+    const all={};
+    good.forEach(function(s){
+      const hit=cum[s].filter(function(p){return p[0]===day;})[0];
+      if(hit) all[s]=hit[1];
+    });
+    if(Object.keys(all).length) pts.push({k:day,v:all[newest]!=null?all[newest]:null,all:all});
+  }
+  return svg(axes(x,y,0,yh,xt)+paths,
+    {pts:pts,x:x,y:y,label:function(p){
+      const vals=Object.keys(p.all).map(function(s){return p.all[s];}).sort(function(a,b){return a-b;});
+      const m=median(vals);
+      const day0=new Date(Date.UTC(2001,9,1+p.k));
+      return '<b>'+day0.getUTCDate()+' '+MONTH[day0.getUTCMonth()]+'</b><br>'+
+        'median to date '+fmt(m)+' mm<br>'+
+        'driest '+fmt(vals[0])+' \u00b7 wettest '+fmt(vals[vals.length-1])+' mm<br>'+
+        '<span style="color:var(--tx3)">'+vals.length+' seasons</span>';
+    }})+
+    '<div class="legend">'+good.slice(-6).map(function(s){
+      return '<span><i style="background:'+yearColour(s,good)+'"></i>'+s+'/'+String(s+1).slice(2)+'</span>';
+    }).join('')+'<span style="color:var(--tx3)">older seasons in blue</span></div>';
+}
+
+function frostStats(){
+  const byY={};
+  WX.daily.forEach(function(r){
+    if(!r[5]) return;
+    const dt=new Date(r[0]*DAY), Y=dt.getUTCFullYear();
+    if(WX.complete_years.indexOf(Y)<0) return;
+    const doy=Math.floor((r[0]*DAY-Date.UTC(Y,0,1))/DAY)+1;
+    const b=(byY[Y]=byY[Y]||{spring:null,autumn:null,frost:0,rain:0,et0:0,tmax:[]});
+    b.rain+=r[3]; b.et0+=r[4]; b.tmax.push(r[1]);
+    if(r[2]<=0){
+      b.frost++;
+      if(doy<=182) b.spring=Math.max(b.spring||0,doy);
+      else b.autumn=Math.min(b.autumn||400,doy);
+    }
+  });
+  const yrs=Object.keys(byY).map(Number).sort();
+  const spring=yrs.map(function(y){return byY[y].spring;}).filter(function(v){return v;});
+  const autumn=yrs.map(function(y){return byY[y].autumn;}).filter(function(v){return v;});
+  const rain=yrs.map(function(y){return byY[y].rain;});
+  const et0=yrs.map(function(y){return byY[y].et0;});
+  const frost=yrs.map(function(y){return byY[y].frost;});
+  const label=function(doy){
+    if(doy==null) return '\u2014';
+    const d=new Date(Date.UTC(2001,0,Math.round(doy)));
+    return d.getUTCDate()+' '+MONTH[d.getUTCMonth()];
+  };
+  const tRain=linreg(yrs,rain);
+  const free=yrs.map(function(y){
+    const b=byY[y]; return (b.spring&&b.autumn)?b.autumn-b.spring:null;
+  }).filter(function(v){return v;});
+  return statGrid([
+    ['Last spring frost', label(median(spring)), null,
+     '9 yrs in 10 by '+label(quantile(spring,.9))],
+    ['First autumn frost', label(median(autumn)), null,
+     'in '+autumn.length+' of '+yrs.length+' years'],
+    ['Frost-free season', free.length?fmt(median(free))+' <span class="u">days</span>':'\u2014',
+     null, free.length?fmt(Math.min.apply(null,free))+'\u2013'+fmt(Math.max.apply(null,free)):''],
+    ['Frost nights', fmt(median(frost),1)+' <span class="u">/yr</span>', null,
+     'reanalysis average, a floor'],
+    ['Annual rain', fmt(median(rain))+' <span class="u">mm</span>', null,
+     fmt(Math.min.apply(null,rain))+'\u2013'+fmt(Math.max.apply(null,rain))+' mm'],
+    ['Rain trend', tRain?(tRain.slope>0?'+':'')+fmt(tRain.slope*10)+' <span class="u">mm/decade</span>':'\u2014',
+     tRain&&tRain.slope<0?'var(--warn)':null,
+     tRain?'r = '+tRain.r.toFixed(2)+', weak either way':''],
+    ['Annual ET0', fmt(median(et0))+' <span class="u">mm</span>', null,
+     'reference demand'],
+    ['Shortfall', fmt(median(et0)-median(rain))+' <span class="u">mm</span>','var(--warn)',
+     'per dunum, that is m\u00b3 to pump'],
+  ]);
 }
 
 /* ============================================================ ECONOMICS
@@ -1259,11 +1650,12 @@ async function renderMoney(){
   const el=document.getElementById('moneyBody');
   const z=zones.find(x=>x.id===selId)||zones[0];
   if(!PIDX){ try{ PIDX=await getJSON('data/prices_index.json'); }catch(e){} }
-  if(PIDX) CROPS.forEach(c=>{
-    if(!settings.priceMap[c.id]){
-      const hit=PIDX.series.filter(s=>s.name===c.id)[0];
-      if(hit) settings.priceMap[c.id]=hit.id;
-    }
+  if(PIDX) CROPS.forEach(function(c){
+    const vs=varietiesOf(c.id);
+    if(!vs.length) return;
+    // default to the most-traded variety; the switcher below overrides it
+    if(!settings.priceMap[c.id] || !vs.some(function(s){return s.id===settings.priceMap[c.id];}))
+      settings.priceMap[c.id]=vs[0].id;
   });
 
   const dunum=z?areaM2(z.poly)/1000:1;
@@ -1324,6 +1716,7 @@ async function renderMoney(){
     :'<div class="card"><div class="why">Draw a plot on the Plan tab to enter '+
      'costs and rank crops against it.</div></div>')+
 
+   varietyCard()+
    '<div class="card"><h3>Crop ranking</h3><div class="why">Margin per cubic '+
    'metre of water, because the well is the binding constraint, not the land. '+
    'Price is what the harvest weeks have actually paid across eleven years, so '+

@@ -82,9 +82,11 @@ def build_prices(args, outdir):
 
     mapping, members = load_mapping(args.mapping)
     if mapping:
-        print(f"Mapping: {len(mapping)} item names -> {len(members)} crops")
+        print(f"Mapping: {len(mapping)} items tagged across {len(members)} crops")
+        for cid, items in sorted(members.items()):
+            print(f"  {cid:<13} {len(items)} variety/varieties")
     else:
-        print("No mapping applied. Series will use raw bulletin names.")
+        print("No mapping. Series keep raw bulletin names and carry no crop tag.")
 
     series = defaultdict(list)
     skipped = 0
@@ -99,7 +101,7 @@ def build_prices(args, outdir):
             except (ValueError, KeyError):
                 continue
             item = row["item"].strip()
-            key = mapping.get(item, item)
+            key = item          # never merged; the crop is a tag, not a bucket
             try:
                 lo = float(row["price_low"])
                 hi = float(row["price_high"])
@@ -162,8 +164,8 @@ def build_prices(args, outdir):
 
         sid = f"s{n:03d}"
         payload = {
-            "id": sid, "name": key,
-            "members": members.get(key, [key]) if mapping else [key],
+            "id": sid, "name": key, "crop": mapping.get(key),
+            "members": [key],
             "first": rows[0][0].isoformat(), "last": rows[-1][0].isoformat(),
             "days": days,
             "weekly_cols": ["week", "mode", "low", "high", "qty_t", "n"],
@@ -177,11 +179,11 @@ def build_prices(args, outdir):
             encoding="utf-8")
 
         index.append({
-            "id": sid, "name": key, "days": days,
+            "id": sid, "name": key, "crop": mapping.get(key), "days": days,
             "first": rows[0][0].isoformat(), "last": rows[-1][0].isoformat(),
             "median_price": r(median([m for _, m, *_ in rows])),
             "median_qty_t": r(median([q for *_, q in rows if q]), 2),
-            "mapped": bool(mapping and key in members),
+            "mapped": key in mapping,
         })
 
     (outdir / "prices_index.json").write_text(
