@@ -145,6 +145,7 @@ select{width:100%}
     <button class="tab on" id="tb-plan"    onclick="setView('plan')">Plan</button>
     <button class="tab"    id="tb-prices"  onclick="setView('prices')">Prices</button>
     <button class="tab"    id="tb-weather" onclick="setView('weather')">Weather</button>
+    <button class="tab"    id="tb-money"   onclick="setView('money')">Money</button>
   </div>
 
   <div class="view on" id="v-plan">
@@ -165,6 +166,7 @@ select{width:100%}
 
   <div class="view" id="v-prices"><div class="scroll" id="pricesBody"></div></div>
   <div class="view" id="v-weather"><div class="scroll" id="weatherBody"></div></div>
+  <div class="view" id="v-money"><div class="scroll" id="moneyBody"></div></div>
 </div>
 <div class="tip" id="tip"></div>
 
@@ -598,7 +600,7 @@ document.addEventListener('touchmove',e=>{ if(compassDrag){e.preventDefault();co
   document.addEventListener(ev,()=>{ if(compassDrag){compassDrag=false;render();} }));
 
 function exportJSON(){
-  const b=new Blob([JSON.stringify({zones,nextId},null,2)],{type:'application/json'});
+  const b=new Blob([JSON.stringify({zones,nextId,settings},null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(b);
   a.download='cropplan-plots.json'; a.click();
 }
@@ -607,6 +609,7 @@ function importJSON(ev){
   const r=new FileReader();
   r.onload=()=>{ try{ const d=JSON.parse(r.result); push();
     zones=d.zones||[]; nextId=d.nextId||zones.length+1;
+    if(d.settings) settings=Object.assign(settings,d.settings);
     selId=zones.length?zones[0].id:null; render();
   }catch(e){ setHint('That file is not CropPlan plots'); } };
   r.readAsText(f);
@@ -614,13 +617,14 @@ function importJSON(ev){
 
 /* ============================================================ TABS */
 function setView(v){
-  ['plan','prices','weather'].forEach(k=>{
+  ['plan','prices','weather','money'].forEach(k=>{
     document.getElementById('v-'+k).classList.toggle('on',k===v);
     document.getElementById('tb-'+k).classList.toggle('on',k===v);
   });
   if(v==='plan') setTimeout(()=>map.invalidateSize(),50);
   if(v==='prices') renderPrices();
   if(v==='weather') renderWeather();
+  if(v==='money') renderMoney();
 }
 
 /* ============================================================ CSV */
@@ -1109,6 +1113,262 @@ function chartFrost(){
     {pts:per.map((v,i)=>({k:i,v})),x,y,
      label:p=>`<b>${MONTH[p.k]}</b><br>${p.v.toFixed(1)} frost nights per year`});
 }
+
+/* ============================================================ ECONOMICS
+   Nothing here is sourced. Every figure is yours, entered once and saved with
+   the plots. Blank stays blank: a missing input produces "cannot compute",
+   never a filled-in guess, because these numbers multiply straight through to
+   the answer.
+
+   Bulletin prices are wholesale at the Amman central market, in fils per kg.
+   1000 fils = 1 JD. What reaches you is less, and how much less depends on
+   which channel the produce goes through.                                  */
+
+let settings = {
+  /* The bulletin prints a bare number. Whether it is piastres (1/100 JD) or
+     fils (1/1000 JD) changes every result by a factor of ten, and the
+     bulletin does not say. Potato at 35 and cherry tomato at 150 read as
+     0.35 and 1.50 JD/kg under piastres, which is plausible, and as 0.035 and
+     0.15 under fils, which is not. Piastres is the default on that reasoning
+     alone. CONFIRM IT AGAINST A PRICE YOU KNOW before trusting any figure
+     downstream. */
+  unitsPerJD:100,
+  dayRate:null, waterCost:null, irrigEff:null,
+  gateCommissionPct:null,
+  marketFactor:1.0, marketKgPerDay:null, marketDaysPerWeek:null,
+  tripCost:null, stallFee:null,
+  crateCost:null, crateKg:null, crateUses:1,
+  priceMap:{},
+};
+const PLOT_COSTS = [
+  ['seedPerPlant','Seed or transplant, per plant','JD'],
+  ['prepPerDunum','Land prep, per dunum','JD'],
+  ['inputsPerDunum','Fertiliser and chemicals, per dunum','JD'],
+  ['dripPerMetre','Drip tape, per metre of row','JD'],
+  ['plantingDays','Planting labour, days per dunum','d'],
+  ['weedingDays','Weeding and tending, days per dunum','d'],
+  ['pickDaysPerTonne','Picking labour, days per tonne','d'],
+];
+const SETTINGS_FIELDS = [
+  ['dayRate','Hired labour, per day','JD'],
+  ['waterCost','Water, per cubic metre','JD'],
+  ['irrigEff','Irrigation efficiency, 0 to 1',''],
+  ['gateCommissionPct','Farm gate: trader&rsquo;s cut','%'],
+  ['marketFactor','Local market price vs Amman bulletin','x'],
+  ['marketKgPerDay','Local market: kg you can sell in a day','kg'],
+  ['marketDaysPerWeek','Local market: days per week','d'],
+  ['tripCost','Fuel and running cost, per market day','JD'],
+  ['stallFee','Stall or entry fee, per market day','JD'],
+  ['crateCost','Crate cost','JD'],
+  ['crateKg','Kilos per crate','kg'],
+  ['crateUses','Trips a crate survives','x'],
+];
+
+const SEASONAL={};
+async function seasonalFor(seriesId){
+  if(SEASONAL[seriesId]) return SEASONAL[seriesId];
+  try{ const d=await getJSON('data/prices/'+seriesId+'.json');
+       SEASONAL[seriesId]=d.seasonal; return d.seasonal; }
+  catch(e){ return null; }
+}
+
+/* Harvest runs over the late stage, not a single day. */
+function harvestWeeks(crop){
+  const L=crop.stages, total=L[0]+L[1]+L[2]+L[3], late=L[3];
+  const doy0=Math.floor((Date.UTC(2001,crop.plant[0]-1,crop.plant[1])
+              -Date.UTC(2001,0,1))/DAY)+total-late;
+  const weeks=[];
+  for(let d=doy0; d<doy0+late; d+=7) weeks.push(Math.min(52,Math.floor((d%365)/7)));
+  return {weeks:[...new Set(weeks)], total, late,
+          harvestFrom:doy0, harvestTo:doy0+late};
+}
+
+function priceBand(seasonal, weeks){
+  if(!seasonal) return null;
+  const rows=seasonal.filter(r=>weeks.indexOf(r[0])>=0);
+  if(!rows.length) return null;
+  const pick=i=>median(rows.map(r=>r[i]).filter(v=>v!=null));
+  return {p10:pick(1),p25:pick(2),p50:pick(3),p75:pick(4),p90:pick(5),
+          qty:median(rows.map(r=>r[6]).filter(v=>v!=null)), n:rows.length};
+}
+
+function economics(z, crop, filsPerKg, lay, dunum){
+  const S=settings, missing=[];
+  const yieldKg = (z.yieldPerDunum!=null?z.yieldPerDunum
+    :(YIELDS&&YIELDS.crops&&YIELDS.crops[crop.id]?YIELDS.crops[crop.id].kg_per_dunum:null));
+  if(yieldKg==null) missing.push('yield');
+  if(S.dayRate==null) missing.push('day rate');
+  if(S.gateCommissionPct==null) missing.push('trader\u2019s cut');
+  if(missing.length) return {missing:missing};
+
+  const c=z.costs||{};
+  const total=yieldKg*dunum;
+  const hw=harvestWeeks(crop);
+  const weeksOut=Math.max(1,Math.ceil(hw.late/7));
+
+  /* The local market has a hard ceiling. Whatever the harvest window makes
+     beyond what you can physically sell goes to the gate at the lower price,
+     whether you like it or not. Selling the whole crop at the better price
+     would be flattering nonsense. */
+  const cap=(S.marketKgPerDay&&S.marketDaysPerWeek)
+    ? S.marketKgPerDay*S.marketDaysPerWeek*weeksOut : 0;
+  const viaMarket=Math.min(total,cap), viaGate=total-viaMarket;
+  const marketDays=S.marketKgPerDay?Math.ceil(viaMarket/S.marketKgPerDay):0;
+
+  const jd=filsPerKg/(settings.unitsPerJD||100);
+  const gatePrice=jd*(1-S.gateCommissionPct/100);
+  const marketPrice=jd*(S.marketFactor||1);
+  const cratePerKg=(S.crateCost&&S.crateKg)
+    ? S.crateCost/S.crateKg/Math.max(1,S.crateUses||1) : 0;
+
+  const revenue = viaGate*gatePrice + viaMarket*marketPrice
+                - viaMarket*cratePerKg
+                - marketDays*((S.tripCost||0)+(S.stallFee||0));
+
+  const w=waterMin(crop);
+  const grossW = w ? w.mm/(S.irrigEff||1) : null;
+  const costs={
+    seed:(c.seedPerPlant||0)*lay.plants,
+    prep:(c.prepPerDunum||0)*dunum,
+    inputs:(c.inputsPerDunum||0)*dunum,
+    drip:(c.dripPerMetre||0)*lay.rowMetres,
+    planting:(c.plantingDays||0)*dunum*S.dayRate,
+    weeding:(c.weedingDays||0)*dunum*S.dayRate,
+    picking:(c.pickDaysPerTonne||0)*(total/1000)*S.dayRate,
+    water:(grossW!=null&&S.waterCost!=null)?grossW*dunum*S.waterCost:0,
+  };
+  let cost=0; for(const k in costs) cost+=costs[k];
+  const m3=grossW!=null?grossW*dunum:null;
+  return {revenue:revenue,cost:cost,margin:revenue-cost,costs:costs,total:total,
+          viaGate:viaGate,viaMarket:viaMarket,marketDays:marketDays,cap:cap,
+          m3:m3,perM3:m3?(revenue-cost)/m3:null};
+}
+
+function field(obj,key,label,unit,fn){
+  const v=obj[key];
+  return '<div class="row"><label>'+label+(unit?' <span class="ar">'+unit+'</span>':'')+
+    '</label><input type="number" step="any" value="'+(v==null?'':v)+'" placeholder="\u2014" '+
+    'class="'+(v==null?'blank':'')+'" onchange="'+fn+'(\''+key+'\',this.value===\'\'?null:+this.value)"></div>';
+}
+function setSetting(k,v){ settings[k]=v; renderMoney(); }
+function setCost(k,v){ const z=zones.find(x=>x.id===selId); if(!z)return;
+  push(); z.costs=z.costs||{}; z.costs[k]=v; renderMoney(); }
+
+/* ============================================================ MONEY TAB */
+async function renderMoney(){
+  const el=document.getElementById('moneyBody');
+  const z=zones.find(x=>x.id===selId)||zones[0];
+  if(!PIDX){ try{ PIDX=await getJSON('data/prices_index.json'); }catch(e){} }
+  if(PIDX) CROPS.forEach(c=>{
+    if(!settings.priceMap[c.id]){
+      const hit=PIDX.series.filter(s=>s.name===c.id)[0];
+      if(hit) settings.priceMap[c.id]=hit.id;
+    }
+  });
+
+  const dunum=z?areaM2(z.poly)/1000:1;
+  const lay=z?layout(z):{plants:0,rowMetres:0};
+  const base=z||{costs:{}};
+
+  const ranked=[];
+  for(let i=0;i<CROPS.length;i++){
+    const c=CROPS[i]; if(c.gap) continue;
+    const sid=settings.priceMap[c.id];
+    const seasonal=sid?await seasonalFor(sid):null;
+    const hw=harvestWeeks(c);
+    const band=priceBand(seasonal,hw.weeks);
+    let econ=null;
+    if(band){
+      const mid=economics(base,c,band.p50,lay,dunum);
+      econ=mid.missing?mid:{mid:mid,
+        lo:economics(base,c,band.p10,lay,dunum),
+        hi:economics(base,c,band.p90,lay,dunum)};
+    }
+    ranked.push({crop:c,sid:sid,band:band,hw:hw,econ:econ});
+  }
+  ranked.sort((a,b)=>{
+    const va=(a.econ&&!a.econ.missing&&a.econ.mid.perM3!=null)?a.econ.mid.perM3:-1e9;
+    const vb=(b.econ&&!b.econ.missing&&b.econ.mid.perM3!=null)?b.econ.mid.perM3:-1e9;
+    return vb-va;
+  });
+
+  const gaps=[];
+  ranked.forEach(r=>{ if(r.econ&&r.econ.missing)
+    r.econ.missing.forEach(m=>{ if(gaps.indexOf(m)<0) gaps.push(m); }); });
+
+  el.innerHTML=
+   '<div class="card"><h3>Selling</h3>'+
+   '<div class="row"><label>Bulletin price unit</label>'+
+   '<select style="width:150px" onchange="setSetting(\'unitsPerJD\',+this.value)">'+
+   '<option value="100"'+(settings.unitsPerJD==100?' selected':'')+'>piastres (1/100 JD)</option>'+
+   '<option value="1000"'+(settings.unitsPerJD==1000?' selected':'')+'>fils (1/1000 JD)</option>'+
+   '</select></div>'+
+   '<div class="gap">A median '+(PIDX?'listed price':'price')+' reads very '+
+   'differently under the two. Check one crop you know: at piastres, potato '+
+   'at 35 is 0.35 JD/kg. If that is wrong, switch to fils and every number '+
+   'on this page moves by ten.</div>'+
+   '<div class="why">Bulletin prices are '+
+   'wholesale in Amman. What reaches you depends on the channel. The local '+
+   'market pays better but has a ceiling: whatever the harvest makes beyond '+
+   'what you can physically sell goes to the gate at the trader&rsquo;s price. '+
+   'Nothing here has a default. Fill what you know, leave the rest blank.</div>'+
+   SETTINGS_FIELDS.map(f=>field(settings,f[0],f[1],f[2],'setSetting')).join('')+
+   '</div>'+
+
+   (z?'<div class="card"><h3>Costs for '+z.label+'</h3><div class="why">Per '+
+     'plot, since two dunum of okra and fifteen of garlic are not the same '+
+     'job. Drip tape uses the row length the geometry already gave: '+
+     fmt(lay.rowMetres)+' m.</div>'+
+     PLOT_COSTS.map(f=>field(z.costs||{},f[0],f[1],f[2],'setCost')).join('')+
+     '</div>'
+    :'<div class="card"><div class="why">Draw a plot on the Plan tab to enter '+
+     'costs and rank crops against it.</div></div>')+
+
+   '<div class="card"><h3>Crop ranking</h3><div class="why">Margin per cubic '+
+   'metre of water, because the well is the binding constraint, not the land. '+
+   'Price is what the harvest weeks have actually paid across eleven years, so '+
+   'the range is evidence rather than a confidence interval.'+
+   (z?' Against '+z.label+', '+fmt(dunum,2)+' dunum.':'')+'</div>'+
+   (gaps.length?'<div class="gap"><b>Cannot compute yet.</b> Missing: '+
+     gaps.join(', ')+'.</div>':'')+
+   rankTable(ranked)+'</div>';
+}
+
+function rankTable(ranked){
+  const ok=ranked.filter(r=>r.econ&&!r.econ.missing);
+  if(!ok.length){
+    const noPrice=ranked.filter(r=>!r.band).map(r=>r.crop.en);
+    return '<div class="why">Nothing to rank yet.'+
+      (noPrice.length?' No price series linked for: '+noPrice.join(', ')+
+       '. Fill crop_id in item_mapping.csv and re-run aggregate.py.':'')+'</div>';
+  }
+  return '<div class="out" style="padding:0">'+ok.map(function(r){
+    const e=r.econ,m=e.mid;
+    const d0=new Date(Date.UTC(2001,0,1+r.hw.harvestFrom));
+    const d1=new Date(Date.UTC(2001,0,1+r.hw.harvestTo));
+    const pos=m.perM3>0;
+    return '<div style="padding:9px 10px;border-bottom:1px solid rgba(48,54,61,.6)">'+
+     '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'+
+      '<div><b style="font-size:13px">'+r.crop.en+'</b><span class="u"> \u00b7 '+r.crop.ar+'</span></div>'+
+      '<div class="v" style="font-size:15px;color:'+(pos?'var(--ok)':'var(--err)')+'">'+
+       fmt(m.perM3,2)+' <span class="u">JD/m\u00b3</span></div></div>'+
+     '<div style="font-size:10px;color:var(--tx3);margin-top:3px;line-height:1.6">'+
+      'plant '+MONTH[r.crop.plant[0]-1]+' '+r.crop.plant[1]+' \u00b7 harvest '+
+      d0.getUTCDate()+' '+MONTH[d0.getUTCMonth()]+'\u2013'+d1.getUTCDate()+' '+
+      MONTH[d1.getUTCMonth()]+' \u00b7 '+r.hw.total+' days<br>'+
+      'price '+fmt(r.band.p10)+'\u2013'+fmt(r.band.p90)+' fils/kg (median '+fmt(r.band.p50)+')<br>'+
+      'margin '+fmt(e.lo.margin)+' to '+fmt(e.hi.margin)+' JD, median '+fmt(m.margin)+
+      ' \u00b7 water '+fmt(m.m3)+' m\u00b3<br>'+
+      (m.cap>0?fmt(m.viaMarket)+' kg to market over '+m.marketDays+' days, '+
+        fmt(m.viaGate)+' kg to the gate'
+       :'all '+fmt(m.total)+' kg to the gate')+
+     '</div></div>';
+  }).join('')+'</div>'+
+  '<div class="note">Water is ETc divided by your efficiency figure. ETc is a '+
+  'floor, so with efficiency blank the water cost is understated and every '+
+  'crop looks better than it is.</div>';
+}
+
 
 upDo(); render();
 </script>
