@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>CropPlan — Mafraq</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--sur:#161b22;--sur2:#1c2129;--sur3:#21262d;
+  --bdr:#30363d;--bdr2:#484f58;
+  --tx:#e6edf3;--tx2:#8b949e;--tx3:#6e7681;
+  --ok:#3fb950;--info:#58a6ff;--warn:#d29922;--err:#f85149;
+  --row:#fbbf24;--qty:#a78bfa;--band:#1f6feb;
+  --r:8px;--rs:5px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;
+  -webkit-text-size-adjust:100%}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+
+#topbar{height:44px;background:var(--sur);border-bottom:1px solid var(--bdr);
+  display:flex;align-items:center;padding:0 10px;gap:6px;flex-shrink:0;z-index:900}
+.logo{font-weight:700;font-size:15px;color:var(--ok);letter-spacing:-.3px}
+.spacer{flex:1}
+.btn{height:28px;padding:0 9px;background:var(--sur2);border:1px solid var(--bdr);
+  border-radius:var(--rs);color:var(--tx2);font-size:11px;cursor:pointer;
+  white-space:nowrap;font-family:inherit}
+.btn:hover:not(:disabled){background:var(--sur3);color:var(--tx)}
+.btn:disabled{opacity:.35;cursor:default}
+.btn.on{background:var(--ok);border-color:var(--ok);color:#0d1117;font-weight:600}
+.btn.err{border-color:#5a2d32;color:var(--err)}
+.btn:focus-visible{outline:2px solid var(--info);outline-offset:1px}
+
+#tabs{display:flex;background:var(--sur);border-bottom:1px solid var(--bdr);
+  flex-shrink:0;z-index:800}
+.tab{flex:1;height:36px;background:none;border:none;border-bottom:2px solid transparent;
+  color:var(--tx3);font-size:12px;font-family:inherit;cursor:pointer;letter-spacing:.2px}
+.tab.on{color:var(--ok);border-bottom-color:var(--ok);font-weight:600}
+
+.view{flex:1;display:none;flex-direction:column;min-height:0}
+.view.on{display:flex}
+
+/* ---- plan ---- */
+#mw{flex:1;position:relative;min-height:0}
+#map{width:100%;height:100%;background:#0a0d12}
+.leaflet-container{background:#0a0d12;cursor:default}
+#tools{position:absolute;top:10px;left:10px;z-index:500;display:flex;
+  flex-direction:column;gap:5px}
+#tools .btn{height:34px;width:34px;padding:0;font-size:15px;display:flex;
+  align-items:center;justify-content:center}
+#snapring{position:absolute;width:20px;height:20px;border:2px solid var(--ok);
+  border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;
+  display:none;z-index:520}
+.hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  background:rgba(22,27,34,.94);border:1px solid var(--bdr);border-radius:var(--rs);
+  padding:6px 11px;font-size:11px;color:var(--tx2);z-index:500;pointer-events:none;
+  white-space:nowrap}
+
+#sheet{background:var(--sur);border-top:1px solid var(--bdr);flex-shrink:0;
+  max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#grip{height:20px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;border-bottom:1px solid var(--bdr);position:sticky;top:0;
+  background:var(--sur);z-index:5}
+#grip span{width:34px;height:3px;background:var(--bdr2);border-radius:2px}
+#sheet.min .body{display:none}
+.body{padding:10px 12px 18px}
+
+/* ---- shared ---- */
+.sec{margin-bottom:14px}
+.sec-h{font-size:10px;text-transform:uppercase;letter-spacing:.7px;
+  color:var(--tx3);margin-bottom:7px;display:flex;align-items:center;gap:6px}
+.sec-h::after{content:'';flex:1;height:1px;background:var(--bdr)}
+.sec-h .ar{text-transform:none;letter-spacing:0;color:var(--tx3)}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:7px}
+label{font-size:11px;color:var(--tx2);flex:1;min-width:0}
+label .ar{color:var(--tx3);font-size:10px}
+input,select{height:30px;background:var(--sur2);border:1px solid var(--bdr);
+  border-radius:var(--rs);color:var(--tx);padding:0 8px;font-size:12px;
+  font-family:inherit;width:94px;flex-shrink:0}
+input:focus,select:focus{outline:none;border-color:var(--ok)}
+input.blank{border-color:var(--warn);background:#1f1a0d}
+select{width:100%}
+.wide{width:100%}
+.out{background:var(--sur2);border:1px solid var(--bdr);border-radius:var(--r);
+  padding:10px;margin-bottom:8px}
+.kv{display:flex;justify-content:space-between;align-items:baseline;
+  padding:4px 0;border-bottom:1px solid rgba(48,54,61,.5);gap:10px}
+.kv:last-child{border-bottom:none}
+.kv .k{font-size:11px;color:var(--tx2)}
+.kv .v{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.kv .v.big{font-size:18px;color:var(--ok)}
+.kv .v.na{color:var(--warn);font-size:12px;font-weight:500}
+.u{font-size:11px;color:var(--tx3);font-weight:400}
+.note{font-size:10px;line-height:1.5;color:var(--tx3);margin-top:6px}
+.note b{color:var(--warn);font-weight:600}
+.gap{background:#1f1a0d;border:1px solid #5a4a1a;border-radius:var(--rs);
+  padding:8px;font-size:10px;line-height:1.5;color:var(--warn);margin-top:6px}
+.zlist{display:flex;flex-wrap:wrap;gap:6px}
+.zchip{padding:5px 9px;background:var(--sur2);border:1px solid var(--bdr);
+  border-radius:14px;font-size:11px;cursor:pointer;color:var(--tx2)}
+.zchip.on{border-color:var(--ok);color:var(--ok);background:#0d2c1a}
+
+/* ---- analysis ---- */
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px}
+.card{background:var(--sur);border:1px solid var(--bdr);border-radius:var(--r);
+  padding:11px;margin-bottom:12px}
+.card h3{font-size:12px;font-weight:600;margin-bottom:2px}
+.card .why{font-size:10px;color:var(--tx3);line-height:1.5;margin-bottom:9px}
+.chart{width:100%;display:block;touch-action:pan-y}
+.chart text{font-size:9px;fill:var(--tx3);font-family:inherit}
+.ax{stroke:var(--bdr);stroke-width:1}
+.grid{stroke:var(--bdr);stroke-width:.5;opacity:.45}
+.rng{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
+.rng .btn{height:24px;padding:0 8px;font-size:10px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:10px;color:var(--tx2);
+  margin-top:7px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;
+  margin-right:4px;vertical-align:-1px}
+.drop{border:1px dashed var(--bdr2);border-radius:var(--r);padding:18px 12px;
+  text-align:center;font-size:11px;color:var(--tx3);line-height:1.6}
+.drop b{color:var(--tx2);display:block;margin-bottom:4px;font-size:12px}
+.tip{position:fixed;background:rgba(22,27,34,.97);border:1px solid var(--bdr);
+  border-radius:var(--rs);padding:6px 9px;font-size:11px;pointer-events:none;
+  z-index:1000;display:none;white-space:nowrap}
+.hidden{display:none!important}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div class="logo">CropPlan</div>
+    <div class="spacer"></div>
+    <button class="btn" id="b-undo" onclick="undo()" title="Undo">↶</button>
+    <button class="btn" id="b-redo" onclick="redo()" title="Redo">↷</button>
+    <button class="btn err" onclick="deleteZone()" title="Delete plot">🗑</button>
+    <button class="btn" onclick="exportJSON()">Save</button>
+    <button class="btn" onclick="document.getElementById('imp').click()">Load</button>
+    <input type="file" id="imp" accept=".json" class="hidden" onchange="importJSON(event)">
+  </div>
+
+  <div id="tabs">
+    <button class="tab on" id="tb-plan"    onclick="setView('plan')">Plan</button>
+    <button class="tab"    id="tb-prices"  onclick="setView('prices')">Prices</button>
+    <button class="tab"    id="tb-weather" onclick="setView('weather')">Weather</button>
+  </div>
+
+  <div class="view on" id="v-plan">
+    <div id="mw">
+      <div id="map"></div>
+      <div id="tools">
+        <button class="btn" id="t-draw" onclick="setTool('draw')" title="Draw plot">⬡</button>
+        <button class="btn on" id="t-sel" onclick="setTool('select')" title="Select">↖</button>
+      </div>
+      <div id="snapring"></div>
+      <div class="hint hidden" id="hint"></div>
+    </div>
+    <div id="sheet">
+      <div id="grip" onclick="document.getElementById('sheet').classList.toggle('min')"><span></span></div>
+      <div class="body" id="panel"></div>
+    </div>
+  </div>
+
+  <div class="view" id="v-prices"><div class="scroll" id="pricesBody"></div></div>
+  <div class="view" id="v-weather"><div class="scroll" id="weatherBody"></div></div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ============================================================
+   REFERENCE DATA
+   Kc and stage lengths: FAO Irrigation and Drainage Paper 56,
+   Allen et al. 1998, Tables 11 and 12.
+   Monthly ET0: this farm's own figures, from ERA5 reanalysis at
+   32.5N 36.2E, 680 m, 1995-2025, via Open-Meteo. Not a textbook mean.
+   ============================================================ */
+const ET0 = [55.3,65.8,106.5,146.9,194.7,211.8,224.0,203.9,161.4,122.9,80.9,57.9];
+const DIM = [31,28.25,31,30,31,30,31,31,30,31,30,31];
+const MONTH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+const CROPS = [
+ {id:'eggplant',en:'Eggplant',ar:'باذنجان',kc:[0.6,1.05,0.90],stages:[30,45,40,25],
+  plant:[5,15],src:'FAO-56 T11 May/June Mediterranean; T12 Solanaceae'},
+ {id:'sweet_pepper',en:'Sweet pepper',ar:'فلفل حلو',kc:[0.6,1.05,0.90],stages:[25,35,40,20],
+  plant:[4,15],src:'FAO-56 T11 Apr/June Europe & Mediterranean'},
+ {id:'cauliflower',en:'Cauliflower',ar:'قرنبيط / زهرة',kc:[0.7,1.05,0.95],stages:[35,50,40,15],
+  plant:[9,15],src:'FAO-56 T11 September California Desert'},
+ {id:'broccoli',en:'Broccoli',ar:'بروكلي',kc:[0.7,1.05,0.95],stages:[35,45,40,15],
+  plant:[9,15],src:'FAO-56 T11 September California Desert'},
+ {id:'watermelon',en:'Watermelon',ar:'بطيخ',kc:[0.4,1.00,0.75],stages:[10,20,20,30],
+  plant:[3,15],src:'FAO-56 T11 Mar/Aug Near East desert'},
+ {id:'melon',en:'Sweet melon',ar:'شمام',kc:[0.5,1.05,0.75],stages:[25,35,40,20],
+  plant:[5,15],src:'FAO-56 T11 May Mediterranean'},
+ {id:'squash',en:'Squash / courgette',ar:'كوسا',kc:[0.5,0.95,0.75],stages:[25,35,25,15],
+  plant:[4,15],src:'FAO-56 T11 April Mediterranean'},
+ {id:'green_onion',en:'Green onion',ar:'بصل أخضر',kc:[0.7,1.00,1.00],stages:[20,45,20,10],
+  plant:[10,15],src:'FAO-56 T11 October Arid Region'},
+ {id:'sweet_corn',en:'Sweet corn',ar:'ذرة سكرية',kc:[0.3,1.15,1.05],stages:[20,25,25,10],
+  plant:[5,15],src:'FAO-56 T11 May/June Mediterranean'},
+ {id:'hot_pepper',en:'Hot pepper',ar:'فلفل حار',gap:
+  'FAO-56 lists no Kc or stage lengths for hot pepper. Sweet pepper values would be a proxy, which is your call, not a sourced fact.'},
+ {id:'garlic',en:'Garlic',ar:'ثوم',gap:
+  'FAO-56 Table 12 gives Kc for garlic but Table 11 gives no stage lengths, so the season cannot be built.'},
+ {id:'okra',en:'Okra',ar:'بامية',gap:
+  'Okra is absent from FAO-56 entirely, in every crop group. There is not even a group default to fall back on.'},
+];
+
+/* ============================================================ STATE */
+let zones=[], selId=null, tool='select', nextId=1;
+let drawPts=[], ghost=null, nearFirst=false;
+let hist=[], redoStack=[];
+const FARM=[32.495,36.168];
+
+const snap_=()=>JSON.stringify({zones,nextId});
+function push(){ hist.push(snap_()); if(hist.length>60)hist.shift(); redoStack=[]; upDo(); }
+function undo(){ if(!hist.length)return; redoStack.push(snap_()); apply(hist.pop()); }
+function redo(){ if(!redoStack.length)return; hist.push(snap_()); apply(redoStack.pop()); }
+function apply(s){ const d=JSON.parse(s); zones=d.zones; nextId=d.nextId;
+  if(!zones.find(z=>z.id===selId)) selId=zones.length?zones[0].id:null; upDo(); render(); }
+function upDo(){ document.getElementById('b-undo').disabled=!hist.length;
+  document.getElementById('b-redo').disabled=!redoStack.length; }
+
+/* ============================================================ MAP */
+const map=L.map('map',{center:FARM,zoom:16,zoomControl:false,attributionControl:false,
+  doubleClickZoom:false});
+L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{maxZoom:21}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+const gZones=L.layerGroup().addTo(map), gDraft=L.layerGroup().addTo(map);
+
+function px(ll){ return map.latLngToContainerPoint(L.latLng(ll[0],ll[1])); }
+function pixDist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+
+map.on('mousemove',e=>{
+  if(tool!=='draw'||!drawPts.length) return;
+  ghost=[e.latlng.lat,e.latlng.lng];
+  nearFirst = drawPts.length>=3 && pixDist(px(ghost),px(drawPts[0]))<18;
+  drawGhost();
+});
+map.on('mouseout',()=>{ ghost=null; drawGhost(); });
+
+map.on('click',e=>{
+  if(tool!=='draw'){
+    if(!e.originalEvent.__zone){ selId=null; render(); }
+    return;
+  }
+  const p=[e.latlng.lat,e.latlng.lng];
+  if(drawPts.length>=3 && pixDist(px(p),px(drawPts[0]))<18){ finishDraw(); return; }
+  drawPts.push(p); ghost=p; drawGhost();
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ if(drawPts.length){ cancelDraw(); } }
+  else if(e.key==='Enter'&&drawPts.length>=3){ finishDraw(); }
+  else if((e.ctrlKey||e.metaKey)&&e.key==='z'){ e.preventDefault(); e.shiftKey?redo():undo(); }
+  else if(e.key==='Backspace'&&drawPts.length){ e.preventDefault(); drawPts.pop(); drawGhost(); }
+});
+
+function drawGhost(){
+  gDraft.clearLayers();
+  const ring=document.getElementById('snapring');
+  ring.style.display='none';
+  if(!drawPts.length){ setHint(tool==='draw'?'Tap the map to place the first corner':null); return; }
+
+  const end = nearFirst ? drawPts[0] : ghost;
+  const line = end ? [...drawPts,end] : drawPts;
+  if(line.length>=2)
+    L.polyline(line,{color:'#58a6ff',weight:2,dashArray:'6,5',interactive:false}).addTo(gDraft);
+  if(drawPts.length>=2 && end)
+    L.polygon([...drawPts,end],{color:'transparent',fillColor:'#58a6ff',
+      fillOpacity:.10,interactive:false}).addTo(gDraft);
+
+  drawPts.forEach((p,i)=>{
+    L.circleMarker(p,{radius:i===0?6:4.5,color:i===0?'#3fb950':'#58a6ff',
+      fillColor:'#0d1117',fillOpacity:1,weight:2,interactive:false}).addTo(gDraft);
+  });
+
+  if(nearFirst){
+    const q=px(drawPts[0]), r=map.getContainer().getBoundingClientRect(),
+          m=document.getElementById('mw').getBoundingClientRect();
+    ring.style.left=(q.x)+'px'; ring.style.top=(q.y)+'px'; ring.style.display='block';
+  }
+  setHint(drawPts.length<3
+    ? `${drawPts.length} corner${drawPts.length===1?'':'s'} — 3 needed`
+    : (nearFirst?'Click to close the plot':'Click the first corner to close, or Enter'));
+}
+function cancelDraw(){ drawPts=[]; ghost=null; nearFirst=false; gDraft.clearLayers(); setHint('Tap the map to place the first corner'); }
+function finishDraw(){
+  push();
+  const z={id:nextId++,label:'Plot '+nextId,poly:drawPts.slice(),bearing:0,
+           rowSpacing:1.5,plantSpacing:0.5,crop:'eggplant',yieldPerDunum:null};
+  zones.push(z); selId=z.id;
+  drawPts=[]; ghost=null; nearFirst=false; gDraft.clearLayers();
+  setTool('select'); render();
+}
+
+/* ============================================================ GEOMETRY
+   Local metric frame, equirectangular about the polygon centroid.
+   Sub-metre across a plot this size.                                     */
+function frame(poly){
+  const lat0=poly.reduce((a,p)=>a+p[0],0)/poly.length;
+  const lng0=poly.reduce((a,p)=>a+p[1],0)/poly.length;
+  const kx=Math.cos(lat0*Math.PI/180)*111320, ky=110540;
+  return {to:p=>({x:(p[1]-lng0)*kx,y:(p[0]-lat0)*ky}),
+          from:q=>[q.y/ky+lat0,q.x/kx+lng0]};
+}
+function areaM2(poly){
+  const f=frame(poly),pts=poly.map(f.to); let s=0;
+  for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length]; s+=a.x*b.y-b.x*a.y;}
+  return Math.abs(s)/2;
+}
+/* Rows are real lines clipped to the polygon, not area/spacing. That is why
+   the bearing changes the count: it changes where rows meet the boundary. */
+function layout(z){
+  const f=frame(z.poly),pts=z.poly.map(f.to);
+  const rad=z.bearing*Math.PI/180;
+  const ux=Math.sin(rad),uy=Math.cos(rad), vx=Math.cos(rad),vy=-Math.sin(rad);
+  let vmin=Infinity,vmax=-Infinity;
+  pts.forEach(p=>{const s=p.x*vx+p.y*vy; if(s<vmin)vmin=s; if(s>vmax)vmax=s;});
+  if((vmax-vmin)/z.rowSpacing>3000) return {plants:0,rowMetres:0,rows:[],overflow:true};
+  const rows=[]; let plants=0,rowMetres=0;
+  for(let s=vmin+z.rowSpacing/2;s<=vmax;s+=z.rowSpacing){
+    const hits=[];
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i],b=pts[(i+1)%pts.length];
+      const sa=a.x*vx+a.y*vy, sb=b.x*vx+b.y*vy;
+      if((sa<=s&&sb>s)||(sb<=s&&sa>s)){
+        const t=(s-sa)/(sb-sa);
+        hits.push((a.x+t*(b.x-a.x))*ux+(a.y+t*(b.y-a.y))*uy);
+      }
+    }
+    hits.sort((p,q)=>p-q);
+    for(let i=0;i+1<hits.length;i+=2){
+      const L=hits[i+1]-hits[i]; if(L<=0)continue;
+      rowMetres+=L; plants+=Math.floor(L/z.plantSpacing)+1;
+      rows.push([f.from({x:hits[i]*ux+s*vx,y:hits[i]*uy+s*vy}),
+                 f.from({x:hits[i+1]*ux+s*vx,y:hits[i+1]*uy+s*vy})]);
+    }
+  }
+  return {plants,rowMetres,rows,overflow:false};
+}
+
+/* ===================== WATER, approximate minimum =====================
+   ETc over the FAO-56 stage lengths at the crop's normal planting date,
+   using this farm's ET0. A FLOOR: no wetting losses, no application
+   efficiency, no drainage, no rainfall credit.                          */
+function waterMin(c){
+  if(!c.stages) return null;
+  const [Li,Ld,Lm,Ll]=c.stages, total=Li+Ld+Lm+Ll, [kI,kM,kE]=c.kc;
+  let m=c.plant[0],d=c.plant[1],sum=0;
+  for(let i=1;i<=total;i++){
+    let kc;
+    if(i<=Li) kc=kI;
+    else if(i<=Li+Ld) kc=kI+(i-Li)/Ld*(kM-kI);
+    else if(i<=Li+Ld+Lm) kc=kM;
+    else kc=kM+(i-(Li+Ld+Lm))/Ll*(kE-kM);
+    sum+=kc*ET0[m-1]/DIM[m-1];
+    d++; if(d>DIM[m-1]){d=1;m=m%12+1;}
+  }
+  return {mm:sum,days:total,endMonth:m,endDay:Math.round(d)};
+}
+
+/* ============================================================ RENDER
+   Split deliberately. Dragging a vertex or the compass redraws the map only
+   and patches the few numbers that changed. Rebuilding the whole panel on
+   every mousemove destroyed the element being dragged, which is what made
+   the compass unusable.                                                    */
+function render(){ drawMap(); panel(); }
+
+function drawMap(){
+  gZones.clearLayers();
+  zones.forEach(z=>{
+    const sel=z.id===selId;
+    const poly=L.polygon(z.poly,{color:sel?'#4ade80':'#2f6f45',weight:sel?2.5:1.5,
+      fillColor:'#4ade80',fillOpacity:sel?.08:.04}).addTo(gZones);
+    poly.on('click',e=>{ e.originalEvent.__zone=1; selId=z.id; render(); });
+    if(sel){
+      const lay=layout(z);
+      if(!lay.overflow&&lay.rows.length<=600)
+        lay.rows.forEach(r=>L.polyline(r,{color:'#fbbf24',weight:1,opacity:.55,
+          interactive:false}).addTo(gZones));
+      z.poly.forEach((p,i)=>{
+        const h=L.circleMarker(p,{radius:7,color:'#4ade80',fillColor:'#0d1117',
+          fillOpacity:1,weight:2}).addTo(gZones);
+        h.on('mousedown',ev=>{L.DomEvent.stop(ev.originalEvent);push();drag={z,i};map.dragging.disable();});
+        h.on('dblclick',ev=>{L.DomEvent.stop(ev.originalEvent);
+          if(z.poly.length>3){push();z.poly.splice(i,1);render();}});
+      });
+    }
+  });
+}
+
+/* Patch just the numbers that a live drag changes, leaving inputs alone. */
+function patchStats(z){
+  const lay=layout(z), a=areaM2(z.poly)/1000;
+  const set=(id,v)=>{const e=document.getElementById(id); if(e)e.textContent=v;};
+  set('s-area',fmt(a,2)); set('s-plants',lay.overflow?'—':fmt(lay.plants));
+  set('s-rows',fmt(lay.rows.length)); set('s-len',fmt(lay.rowMetres));
+  const yv=document.getElementById('s-yield');
+  const ref=YIELDS&&YIELDS.crops?YIELDS.crops[z.crop]:null;
+  const yd=z.yieldPerDunum ?? (ref?ref.kg_per_dunum:null);
+  if(yv&&yd!=null) yv.textContent=fmt(yd*a/1000,2);
+  const w=document.getElementById('s-water');
+  const c=CROPS.find(x=>x.id===z.crop), wm=c.gap?null:waterMin(c);
+  if(w&&wm) w.textContent=fmt(wm.mm*a);
+}
+
+let drag=null, raf=null;
+function live(fn){ if(raf)return; raf=requestAnimationFrame(()=>{raf=null;fn();}); }
+map.on('mousemove',e=>{
+  if(!drag)return;
+  drag.z.poly[drag.i]=[e.latlng.lat,e.latlng.lng];
+  live(()=>{ drawMap(); patchStats(drag.z); });
+});
+map.on('mouseup',()=>{ if(drag){const z=drag.z;drag=null;map.dragging.enable();render();} });
+
+function setTool(t){
+  tool=t;
+  document.getElementById('t-draw').classList.toggle('on',t==='draw');
+  document.getElementById('t-sel').classList.toggle('on',t==='select');
+  if(t!=='draw') cancelDraw(); else { setHint('Tap the map to place the first corner'); }
+  if(t==='draw') setHint('Tap the map to place the first corner');
+  else setHint(null);
+}
+function setHint(m){ const h=document.getElementById('hint');
+  h.classList.toggle('hidden',!m); if(m)h.textContent=m; }
+function deleteZone(){ if(selId==null)return; push();
+  zones=zones.filter(z=>z.id!==selId); selId=zones.length?zones[zones.length-1].id:null; render(); }
+function fmt(n,d=0){ return (n==null||!isFinite(n))?'—':
+  n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+
+function panel(){
+  const el=document.getElementById('panel');
+  if(!zones.length){
+    el.innerHTML=`<div class="sec"><div class="sec-h">Start here</div>
+      <div class="note" style="font-size:12px;color:var(--tx2);line-height:1.6">
+      Tap ⬡, then tap the map to place corners. The line follows your cursor.
+      Click the first corner again to close the plot, or press Enter.
+      Escape cancels, Backspace removes the last corner.</div></div>`;
+    return;
+  }
+  const z=zones.find(x=>x.id===selId)||zones[0]; selId=z.id;
+  const c=CROPS.find(x=>x.id===z.crop), area=areaM2(z.poly), dunum=area/1000;
+  const lay=layout(z), w=c.gap?null:waterMin(c);
+  const ref=YIELDS&&YIELDS.crops?YIELDS.crops[z.crop]:null;
+  const yd=z.yieldPerDunum ?? (ref?ref.kg_per_dunum:null);
+  const ty=(yd!=null)?yd*dunum:null;
+
+  el.innerHTML=`
+   <div class="sec"><div class="sec-h">Plots</div><div class="zlist">
+    ${zones.map(x=>`<div class="zchip ${x.id===selId?'on':''}" onclick="selId=${x.id};render()">${x.label}</div>`).join('')}
+   </div></div>
+
+   <div class="sec"><div class="sec-h">Crop <span class="ar">المحصول</span></div>
+    <select class="wide" onchange="upd('crop',this.value)">
+     ${CROPS.map(x=>`<option value="${x.id}" ${x.id===z.crop?'selected':''}>${x.en} · ${x.ar}${x.gap?'  (no data)':''}</option>`).join('')}
+    </select>
+    ${c.gap?`<div class="gap"><b>No sourced parameters.</b> ${c.gap}</div>`:`<div class="note">${c.src}</div>`}
+   </div>
+
+   <div class="sec"><div class="sec-h">Row layout <span class="ar">تخطيط الخطوط</span></div>
+    <div style="display:flex;gap:12px;align-items:center">
+     ${compassSVG(z.bearing)}
+     <div style="flex:1">
+      <div class="row"><label>Bearing <span class="ar">اتجاه</span></label>
+       <input id="bearing-in" type="number" value="${z.bearing}" min="0" max="179"
+        onchange="upd('bearing',((Math.round(+this.value)%180)+180)%180)"></div>
+      <div class="row"><label>Between rows, m <span class="ar">بين الخطوط</span></label>
+       <input type="number" value="${z.rowSpacing}" min="0.1" step="0.1" onchange="upd('rowSpacing',Math.max(0.1,+this.value))"></div>
+      <div class="row"><label>Along row, m <span class="ar">داخل الخط</span></label>
+       <input type="number" value="${z.plantSpacing}" min="0.05" step="0.05" onchange="upd('plantSpacing',Math.max(0.05,+this.value))"></div>
+     </div></div>
+    <div class="note">Drag the dial or type. 0° is north. Turning it changes the
+     plant count, because it changes how rows meet the boundary.</div>
+   </div>
+
+   <div class="sec"><div class="sec-h">Plot</div><div class="out">
+    <div class="kv"><span class="k">Area</span><span class="v"><span id="s-area">${fmt(dunum,2)}</span> <span class="u">dunum</span></span></div>
+    <div class="kv"><span class="k">Plants</span><span class="v big" id="s-plants">${lay.overflow?'—':fmt(lay.plants)}</span></div>
+    <div class="kv"><span class="k">Rows</span><span class="v" id="s-rows">${fmt(lay.rows.length)}</span></div>
+    <div class="kv"><span class="k">Row length</span><span class="v"><span id="s-len">${fmt(lay.rowMetres)}</span> <span class="u">m</span></span></div>
+   </div>${lay.overflow?'<div class="gap">Row spacing too small to draw. Increase it.</div>':''}</div>
+
+   <div class="sec"><div class="sec-h">Yield <span class="ar">الإنتاج</span></div>
+    <div class="row"><label>Yield, kg per dunum</label>
+     <input type="number" step="10" min="0" class="${z.yieldPerDunum?'':'blank'}"
+      value="${yd??''}" placeholder="${ref?fmt(ref.kg_per_dunum):'enter'}"
+      onchange="upd('yieldPerDunum',this.value===''?null:+this.value)"></div>
+    <div class="out">
+     <div class="kv"><span class="k">Per plant</span><span class="v">${
+       (yd&&lay.plants)?fmt(yd*dunum/lay.plants,2)+' <span class="u">kg</span>':'—'}</span></div>
+     <div class="kv"><span class="k">Total harvest</span>
+      ${ty?`<span class="v big"><span id="s-yield">${fmt(ty/1000,2)}</span> <span class="u">t</span></span>`
+         :`<span class="v na">enter a yield</span>`}</div></div>
+    ${ref&&ref.kg_per_dunum?`<div class="note">Default ${fmt(ref.kg_per_dunum)} kg/dunum
+      is the FAOSTAT median for Jordan, ${ref.years?ref.years[0]+'–'+ref.years[1]:''},
+      range ${fmt(ref.min)}–${fmt(ref.max)}, reported as “${ref.faostat_item}”.
+      <b>National average.</b> It pools the Jordan Valley and protected
+      cultivation with highland open field, so expect less at 680 m.
+      ${ref.caveat?'<br>'+ref.caveat:''}</div>`
+     : YIELDS?`<div class="note"><b>No default for this crop.</b>
+         ${ref&&ref.note?ref.note:'FAOSTAT has no usable yield figure for it.'}</div>`
+     :`<div class="note"><b>No defaults loaded.</b> Run fetch_yields.py, then
+        load crop_yields.json below. Opening this page straight from disk
+        blocks the automatic fetch, so the button is the reliable route.
+        <div style="margin-top:6px"><input type="file" accept=".json"
+          style="width:auto;height:26px;font-size:10px"
+          onchange="loadYields(event)"></div></div>`}
+   </div>
+
+   <div class="sec"><div class="sec-h">Water, minimum <span class="ar">أقل احتياج مائي</span></div>
+    ${w?`<div class="out">
+     <div class="kv"><span class="k">Season</span><span class="v" style="font-size:12px">${MONTH[c.plant[0]-1]} ${c.plant[1]} → ${MONTH[w.endMonth-1]} ${w.endDay}</span></div>
+     <div class="kv"><span class="k">Per dunum</span><span class="v">${fmt(w.mm)} <span class="u">m³</span></span></div>
+     <div class="kv"><span class="k">This plot</span><span class="v big"><span id="s-water">${fmt(w.mm*dunum)}</span> <span class="u">m³</span></span></div></div>
+     <div class="note">ETc over ${w.days} days from this farm's own 31-year ET0
+      and FAO-56 coefficients. <b>A floor.</b> Excludes wetting losses,
+      application efficiency and drainage. Rainfall not credited.</div>`
+     :`<div class="gap">Cannot be computed without stage lengths.</div>`}
+   </div>
+
+   <div class="sec"><div class="sec-h">Name</div>
+    <input class="wide" value="${z.label}" onchange="upd('label',this.value)"></div>`;
+}
+function upd(k,v){ const z=zones.find(x=>x.id===selId); if(!z)return; push(); z[k]=v; render(); }
+
+/* Sourced yield defaults from fetch_yields.py. Optional: without it every
+   yield field is simply blank, which is the previous behaviour.           */
+let YIELDS=null;
+function loadYields(ev){
+  const f=ev.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ YIELDS=JSON.parse(r.result); render(); }
+                 catch(e){ setHint('That file is not crop_yields.json'); } };
+  r.readAsText(f);
+}
+fetch('crop_yields.json').then(r=>r.ok?r.json():null).then(d=>{
+  if(d){ YIELDS=d; if(zones.length) panel(); }
+}).catch(()=>{});
+
+function compassSVG(b){
+  let t='';
+  for(let a=0;a<360;a+=15){
+    const r1=a%90===0?29:35, rad=(a-90)*Math.PI/180;
+    t+=`<line stroke="var(--bdr2)" x1="${48+r1*Math.cos(rad)}" y1="${48+r1*Math.sin(rad)}" x2="${48+40*Math.cos(rad)}" y2="${48+40*Math.sin(rad)}"/>`;
+  }
+  const rad=(b-90)*Math.PI/180;
+  return `<svg id="compass" viewBox="0 0 96 96" width="96" height="96" style="flex-shrink:0;touch-action:none;cursor:grab">
+    <circle cx="48" cy="48" r="44" fill="var(--sur2)" stroke="var(--bdr)"/>${t}
+    <text x="48" y="15" text-anchor="middle" fill="var(--tx3)" font-size="9">N</text>
+    <line class="needle" stroke="var(--row)" stroke-width="3" stroke-linecap="round"
+      x1="${48-38*Math.cos(rad)}" y1="${48-38*Math.sin(rad)}" x2="${48+38*Math.cos(rad)}" y2="${48+38*Math.sin(rad)}"/>
+    <circle cx="${48-38*Math.cos(rad)}" cy="${48-38*Math.sin(rad)}" r="6" fill="var(--row)" opacity=".25"/>
+    <circle cx="${48+38*Math.cos(rad)}" cy="${48+38*Math.sin(rad)}" r="6" fill="var(--row)" opacity=".25"/>
+    <circle cx="48" cy="48" r="3.5" fill="var(--row)"/>
+    <text class="bval" x="48" y="87" text-anchor="middle" fill="var(--row)" font-size="11">${b}°</text></svg>`;
+}
+/* Compass. Listeners are installed ONCE, not per render, and dragging updates
+   the needle and the counts in place. The old version rebuilt the panel on
+   every mousemove, which deleted the SVG under the cursor and leaked a new
+   window listener each time. That is why it felt like it fought back.      */
+let compassDrag=false;
+function needleAt(deg){
+  const s=document.getElementById('compass'); if(!s)return;
+  const rad=(deg-90)*Math.PI/180;
+  const n=s.querySelector('.needle');
+  n.setAttribute('x1',48-38*Math.cos(rad)); n.setAttribute('y1',48-38*Math.sin(rad));
+  n.setAttribute('x2',48+38*Math.cos(rad)); n.setAttribute('y2',48+38*Math.sin(rad));
+  s.querySelector('.bval').textContent=deg+'°';
+  const inp=document.getElementById('bearing-in'); if(inp)inp.value=deg;
+}
+function compassFrom(ev){
+  const s=document.getElementById('compass'); if(!s)return;
+  const r=s.getBoundingClientRect(), p=ev.touches?ev.touches[0]:ev;
+  const dx=p.clientX-(r.left+r.width/2), dy=p.clientY-(r.top+r.height/2);
+  if(Math.hypot(dx,dy)<8) return;                     // ignore the hub
+  const d=Math.round(Math.atan2(dx,-dy)*180/Math.PI);
+  const deg=((d%180)+180)%180;
+  const z=zones.find(x=>x.id===selId); if(!z)return;
+  z.bearing=deg;
+  needleAt(deg);
+  live(()=>{ drawMap(); patchStats(z); });
+}
+document.addEventListener('mousedown',e=>{
+  if(e.target.closest&&e.target.closest('#compass')){
+    compassDrag=true; push(); e.preventDefault(); compassFrom(e);
+  }
+});
+document.addEventListener('touchstart',e=>{
+  if(e.target.closest&&e.target.closest('#compass')){
+    compassDrag=true; push(); e.preventDefault(); compassFrom(e);
+  }
+},{passive:false});
+document.addEventListener('mousemove',e=>{ if(compassDrag){e.preventDefault();compassFrom(e);} });
+document.addEventListener('touchmove',e=>{ if(compassDrag){e.preventDefault();compassFrom(e);} },{passive:false});
+['mouseup','touchend','touchcancel'].forEach(ev=>
+  document.addEventListener(ev,()=>{ if(compassDrag){compassDrag=false;render();} }));
+
+function exportJSON(){
+  const b=new Blob([JSON.stringify({zones,nextId},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(b);
+  a.download='cropplan-plots.json'; a.click();
+}
+function importJSON(ev){
+  const f=ev.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); push();
+    zones=d.zones||[]; nextId=d.nextId||zones.length+1;
+    selId=zones.length?zones[0].id:null; render();
+  }catch(e){ setHint('That file is not CropPlan plots'); } };
+  r.readAsText(f);
+}
+
+/* ============================================================ TABS */
+function setView(v){
+  ['plan','prices','weather'].forEach(k=>{
+    document.getElementById('v-'+k).classList.toggle('on',k===v);
+    document.getElementById('tb-'+k).classList.toggle('on',k===v);
+  });
+  if(v==='plan') setTimeout(()=>map.invalidateSize(),50);
+  if(v==='prices') renderPrices();
+  if(v==='weather') renderWeather();
+}
+
+/* ============================================================ CSV */
+function parseCSV(text){
+  const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l=>l.length);
+  const head=lines[0].split(',');
+  const out=[];
+  for(let i=1;i<lines.length;i++){
+    const c=lines[i].split(','); if(c.length<head.length) continue;
+    const o={}; head.forEach((h,j)=>o[h]=c[j]); out.push(o);
+  }
+  return out;
+}
+function fileInput(id,onload){
+  return `<div class="drop"><b>No data loaded</b>
+    Choose the file produced by the scripts. It stays on your device.<br><br>
+    <input type="file" accept=".csv" id="${id}" style="width:auto"></div>`;
+}
+
+/* ============================================================ CHART HELPERS */
+const W=1000, H=260, PAD={l:44,r:12,t:10,b:24};
+function scale(d0,d1,r0,r1){ const k=(r1-r0)/((d1-d0)||1); return v=>r0+(v-d0)*k; }
+function niceTicks(lo,hi,n=5){
+  const span=(hi-lo)||1, raw=span/n, mag=Math.pow(10,Math.floor(Math.log10(raw)));
+  const step=[1,2,2.5,5,10].find(s=>s*mag>=raw)*mag;
+  const out=[]; for(let v=Math.ceil(lo/step)*step; v<=hi; v+=step) out.push(v);
+  return out;
+}
+function axes(x,y,yl,yh,xt,yfmt=v=>fmt(v)){
+  let s=`<line class="ax" x1="${PAD.l}" y1="${H-PAD.b}" x2="${W-PAD.r}" y2="${H-PAD.b}"/>`;
+  niceTicks(yl,yh).forEach(v=>{
+    s+=`<line class="grid" x1="${PAD.l}" y1="${y(v)}" x2="${W-PAD.r}" y2="${y(v)}"/>
+        <text x="${PAD.l-6}" y="${y(v)+3}" text-anchor="end">${yfmt(v)}</text>`;
+  });
+  xt.forEach(t=>{ s+=`<text x="${x(t.v)}" y="${H-PAD.b+14}" text-anchor="middle">${t.l}</text>`; });
+  return s;
+}
+/* Charts are inert SVG plus one capture rect. Hovering finds the nearest
+   point by x and draws a crosshair; dragging on a time chart selects a range
+   to zoom into. Registry keeps the data alongside its scales so the handler
+   does not have to re-derive them.                                        */
+const CHARTS={};
+let chartSeq=0;
+function svg(inner,opts){
+  const id='c'+(++chartSeq);
+  if(opts) CHARTS[id]=opts;
+  return `<svg class="chart" id="${id}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    ${inner}<g class="hov"></g>
+    <rect class="cap" x="${PAD.l}" y="${PAD.t}" width="${W-PAD.l-PAD.r}"
+      height="${H-PAD.b-PAD.t}" fill="transparent" style="cursor:crosshair"/></svg>`;
+}
+function svgX(ev,el){
+  const r=el.getBoundingClientRect();
+  const p=ev.touches?ev.touches[0]:ev;
+  return ((p.clientX-r.left)/r.width)*W;
+}
+let brush=null;
+document.addEventListener('mousemove',ev=>{
+  const el=ev.target.closest&&ev.target.closest('svg.chart');
+  const tip=document.getElementById('tip');
+  if(!el||!CHARTS[el.id]){ if(!brush){tip.style.display='none';} return; }
+  const cfg=CHARTS[el.id], sx=svgX(ev,el);
+  const hov=el.querySelector('.hov');
+
+  if(brush&&brush.id===el.id){
+    const a=Math.min(brush.x0,sx), b=Math.max(brush.x0,sx);
+    hov.innerHTML=`<rect x="${a}" y="${PAD.t}" width="${b-a}" height="${H-PAD.b-PAD.t}"
+      fill="#58a6ff" opacity=".18"/>`;
+    return;
+  }
+  let best=null,bd=1e9;
+  cfg.pts.forEach(p=>{ const d=Math.abs(cfg.x(p.k)-sx); if(d<bd){bd=d;best=p;} });
+  if(!best){ tip.style.display='none'; return; }
+  const px=cfg.x(best.k);
+  hov.innerHTML=`<line x1="${px}" y1="${PAD.t}" x2="${px}" y2="${H-PAD.b}"
+      stroke="#8b949e" stroke-width="1" stroke-dasharray="3,3"/>
+    ${best.v!=null?`<circle cx="${px}" cy="${cfg.y(best.v)}" r="4" fill="#3fb950"
+      stroke="#0d1117" stroke-width="1.5"/>`:''}`;
+  tip.innerHTML=cfg.label(best);
+  tip.style.display='block';
+  const p=ev.touches?ev.touches[0]:ev;
+  tip.style.left=Math.min(window.innerWidth-tip.offsetWidth-8,p.clientX+12)+'px';
+  tip.style.top=(p.clientY-tip.offsetHeight-10)+'px';
+});
+document.addEventListener('mouseleave',()=>{document.getElementById('tip').style.display='none';});
+document.addEventListener('mousedown',ev=>{
+  const el=ev.target.closest&&ev.target.closest('svg.chart');
+  if(!el||!CHARTS[el.id]||!CHARTS[el.id].zoom)return;
+  brush={id:el.id,x0:svgX(ev,el)};
+});
+document.addEventListener('mouseup',ev=>{
+  if(!brush)return;
+  const el=document.getElementById(brush.id);
+  const b=brush; brush=null;
+  if(!el){return;}
+  el.querySelector('.hov').innerHTML='';
+  const x1=svgX(ev,el);
+  if(Math.abs(x1-b.x0)<12) return;                 // a click, not a drag
+  const cfg=CHARTS[b.id];
+  const inv=k=>{ let lo=cfg.pts[0].k,hi=cfg.pts[cfg.pts.length-1].k;
+    return lo+(k-PAD.l)/(W-PAD.l-PAD.r)*(hi-lo); };
+  cfg.zoom(inv(Math.min(b.x0,x1)),inv(Math.max(b.x0,x1)));
+});
+function median(a){ if(!a.length)return null; const s=[...a].sort((p,q)=>p-q);
+  const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function quantile(a,q){ if(!a.length)return null; const s=[...a].sort((p,q2)=>p-q2);
+  const i=(s.length-1)*q, lo=Math.floor(i); return s[lo]+(s[Math.min(lo+1,s.length-1)]-s[lo])*(i-lo); }
+
+/* ============================================================ PRICES TAB */
+let PRICE=null, priceItem=null, priceYears=5, priceZoom=null;
+function renderPrices(){
+  const el=document.getElementById('pricesBody');
+  if(!PRICE){
+    el.innerHTML=`<div class="card"><h3>Price history</h3>
+      <div class="why">Load <code>gam_prices_clean.csv</code>, the output of
+      clean_prices.py. Only rows flagged usable are charted; superseded
+      duplicates and detected typos are left out.</div>
+      ${fileInput('pf')}</div>`;
+    document.getElementById('pf').onchange=e=>{
+      const f=e.target.files[0]; if(!f)return;
+      el.innerHTML=`<div class="card"><div class="why">Reading ${(f.size/1e6).toFixed(1)} MB…</div></div>`;
+      const r=new FileReader();
+      r.onload=()=>{ ingestPrices(parseCSV(r.result)); renderPrices(); };
+      r.readAsText(f);
+    };
+    return;
+  }
+  const items=[...PRICE.byItem.keys()].sort((a,b)=>PRICE.byItem.get(b).length-PRICE.byItem.get(a).length);
+  if(!priceItem) priceItem=items[0];
+  const rows=PRICE.byItem.get(priceItem)||[];
+  el.innerHTML=`
+   <div class="card">
+    <select class="wide" onchange="priceItem=this.value;renderPrices()">
+     ${items.map(i=>`<option ${i===priceItem?'selected':''}>${i}</option>`).join('')}
+    </select>
+    <div class="why" style="margin-top:8px">${rows.length} usable observations,
+     ${PRICE.span[0]} to ${PRICE.span[1]}. Prices are fils per kg as published
+     by Greater Amman Municipality. <b>Wholesale, not farmgate.</b></div>
+   </div>
+   <div class="card"><h3>Price over time</h3>
+    <div class="why">Weekly median of the modal price (سعر الأغلب), with the
+     high and low band behind it. The band is grade spread on the same day,
+     not uncertainty.</div>
+    <div class="rng">${[1,3,5,11].map(y=>`<button class="btn ${(!priceZoom&&priceYears===y)?'on':''}"
+      onclick="priceZoom=null;priceYears=${y};renderPrices()">${y===11?'All':y+'y'}</button>`).join('')}
+      ${priceZoom?`<button class="btn on" onclick="priceZoom=null;renderPrices()">✕ zoomed</button>`
+                 :`<span style="font-size:10px;color:var(--tx3);align-self:center">drag on the chart to zoom</span>`}</div>
+    ${chartSeries(rows,priceYears)}
+    <div class="legend"><span><i style="background:#3fb950"></i>modal</span>
+     <span><i style="background:#1f6feb;opacity:.5"></i>low–high band</span></div>
+   </div>
+   <div class="card"><h3>Season shape</h3>
+    <div class="why">Every year overlaid by week of year. The band is the 25th
+     to 75th percentile across years, the line is the median. This is what a
+     harvest window has historically paid, and it is the honest basis for a
+     forecast at planting time.</div>
+    ${chartSeasonal(rows)}
+   </div>
+   <div class="card"><h3>Arrivals</h3>
+    <div class="why">Tonnes entering the market, by week of year, median across
+     years. Price without quantity is half the picture: a high price on two
+     tonnes is a different fact from a high price on two hundred.</div>
+    ${chartArrivals(rows)}
+   </div>`;
+}
+function ingestPrices(rows){
+  const byItem=new Map(); let lo='9999',hi='0';
+  rows.forEach(r=>{
+    if(r.usable!=='1') return;
+    const m=+r.price_mode; if(!isFinite(m)) return;
+    const d=r.date; if(d<lo)lo=d; if(d>hi)hi=d;
+    if(!byItem.has(r.item)) byItem.set(r.item,[]);
+    byItem.get(r.item).push({d, t:Date.parse(d), mode:m,
+      lo:+r.price_low, hi:+r.price_high, q:+r.quantity||0});
+  });
+  byItem.forEach(v=>v.sort((a,b)=>a.t-b.t));
+  PRICE={byItem, span:[lo,hi]};
+}
+function weekOf(ts){ const dt=new Date(ts);
+  const s=Date.UTC(dt.getUTCFullYear(),0,1);
+  return Math.min(52,Math.floor((ts-s)/6048e5)); }
+
+function chartSeries(rows,years){
+  if(!rows.length) return '<div class="why">No data.</div>';
+  const cut=rows[rows.length-1].t - years*365.25*864e5;
+  const use=priceZoom
+    ? rows.filter(r=>r.t>=priceZoom[0]&&r.t<=priceZoom[1])
+    : rows.filter(r=>r.t>=cut);
+  if(use.length<2) return '<div class="why">Not enough data in this range.</div>';
+  // weekly buckets
+  const buck=new Map();
+  use.forEach(r=>{ const k=Math.floor(r.t/6048e5);
+    if(!buck.has(k))buck.set(k,{m:[],l:[],h:[]});
+    const b=buck.get(k); b.m.push(r.mode); b.l.push(r.lo); b.h.push(r.hi); });
+  const pts=[...buck.entries()].sort((a,b)=>a[0]-b[0]).map(([k,b])=>({
+    t:k*6048e5, m:median(b.m), l:median(b.l), h:median(b.h)}));
+  const t0=pts[0].t, t1=pts[pts.length-1].t;
+  const yh=Math.max(...pts.map(p=>p.h))*1.05, yl=0;
+  const x=scale(t0,t1,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
+  const band=pts.map(p=>`${x(p.t)},${y(p.h)}`).join(' ')+' '+
+             pts.slice().reverse().map(p=>`${x(p.t)},${y(p.l)}`).join(' ');
+  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.t)},${y(p.m)}`).join('');
+  const xt=[]; const yrs=new Date(t1).getUTCFullYear()-new Date(t0).getUTCFullYear();
+  for(let Y=new Date(t0).getUTCFullYear();Y<=new Date(t1).getUTCFullYear();Y++){
+    const v=Date.UTC(Y,0,1); if(v>=t0&&v<=t1&&(yrs<8||Y%2===0)) xt.push({v,l:Y});
+  }
+  return svg(axes(x,y,yl,yh,xt)+
+    `<polygon points="${band}" fill="#1f6feb" opacity=".22"/>
+     <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.6"/>`,
+    {pts:pts.map(p=>({k:p.t,v:p.m,l:p.l,h:p.h})), x, y, zoom:(a,b)=>{
+       priceZoom=[a,b]; renderPrices();
+     },
+     label:p=>`<b>${new Date(p.k).toISOString().slice(0,10)}</b><br>
+       modal ${fmt(p.v)} · low ${fmt(p.l)} · high ${fmt(p.h)} fils/kg`});
+}
+function chartSeasonal(rows){
+  if(rows.length<50) return '<div class="why">Not enough data.</div>';
+  const byWeek=Array.from({length:53},()=>[]);
+  rows.forEach(r=>byWeek[weekOf(r.t)].push(r.mode));
+  const pts=byWeek.map((v,w)=>({w, m:median(v), a:quantile(v,.25), b:quantile(v,.75), n:v.length}))
+                  .filter(p=>p.n>=4);
+  if(pts.length<10) return '<div class="why">Not enough data.</div>';
+  const yh=Math.max(...pts.map(p=>p.b))*1.08, yl=0;
+  const x=scale(0,52,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
+  const band=pts.map(p=>`${x(p.w)},${y(p.b)}`).join(' ')+' '+
+             pts.slice().reverse().map(p=>`${x(p.w)},${y(p.a)}`).join(' ');
+  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.w)},${y(p.m)}`).join('');
+  const xt=MONTH.map((l,i)=>({v:i*52/12+2,l}));
+  return svg(axes(x,y,yl,yh,xt)+
+    `<polygon points="${band}" fill="#3fb950" opacity=".18"/>
+     <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.8"/>`,
+    {pts:pts.map(p=>({k:p.w,v:p.m,a:p.a,b:p.b,n:p.n})), x, y,
+     label:p=>{const dt=new Date(Date.UTC(2001,0,1+p.k*7));
+       return `<b>week ${p.k+1} · ${MONTH[dt.getUTCMonth()]}</b><br>
+       median ${fmt(p.v)} fils/kg<br>
+       middle half ${fmt(p.a)}–${fmt(p.b)}<br>
+       <span style="color:var(--tx3)">${p.n} observations</span>`;}});
+}
+function chartArrivals(rows){
+  const byWeek=Array.from({length:53},()=>[]);
+  rows.forEach(r=>{ if(r.q>0) byWeek[weekOf(r.t)].push(r.q); });
+  const pts=byWeek.map((v,w)=>({w,m:median(v)||0,n:v.length})).filter(p=>p.n>=4);
+  if(pts.length<10) return '<div class="why">No quantity data.</div>';
+  const yh=Math.max(...pts.map(p=>p.m))*1.1;
+  const x=scale(0,52,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const bw=(W-PAD.l-PAD.r)/54;
+  const bars=pts.map(p=>`<rect x="${x(p.w)-bw/2}" y="${y(p.m)}" width="${bw*.85}"
+    height="${H-PAD.b-y(p.m)}" fill="#a78bfa" opacity=".7"/>`).join('');
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i*52/12+2,l})),v=>fmt(v))+bars);
+}
+
+/* ============================================================ WEATHER TAB */
+let WX=null;
+function renderWeather(){
+  const el=document.getElementById('weatherBody');
+  if(!WX){
+    el.innerHTML=`<div class="card"><h3>Weather history</h3>
+      <div class="why">Load <code>weather_daily.csv</code> from
+      weather_fetch.py. ERA5 reanalysis at 32.5N 36.2E, 680 m.</div>
+      ${fileInput('wf')}</div>`;
+    document.getElementById('wf').onchange=e=>{
+      const f=e.target.files[0]; if(!f)return;
+      const r=new FileReader();
+      r.onload=()=>{ ingestWeather(parseCSV(r.result)); renderWeather(); };
+      r.readAsText(f);
+    };
+    return;
+  }
+  el.innerHTML=`
+   <div class="card"><div class="why">${WX.rows.length} days,
+    ${WX.rows[0].d} to ${WX.rows[WX.rows.length-1].d}. ERA5 via Open-Meteo.
+    The last few days are preliminary and get revised.</div></div>
+   <div class="card"><h3>Monthly climatology</h3>
+    <div class="why">Mean daily maximum and minimum by month. The gap between
+     them widens in summer, which is what drives evaporative demand.</div>
+    ${chartMonthlyTemp()}
+    <div class="legend"><span><i style="background:#f85149"></i>mean daily max</span>
+     <span><i style="background:#58a6ff"></i>mean daily min</span></div>
+   </div>
+   <div class="card"><h3>Rain against evaporative demand</h3>
+    <div class="why">Monthly rainfall and reference ET0 on the same axis. The
+     distance between them is what irrigation has to cover. Note that summer
+     rain is effectively zero while demand peaks.</div>
+    ${chartRainET()}
+    <div class="legend"><span><i style="background:#58a6ff"></i>rainfall</span>
+     <span><i style="background:#d29922"></i>reference ET0</span></div>
+   </div>
+   <div class="card"><h3>Season rainfall, year by year</h3>
+    <div class="why">Totals over October to September, the right boundary for
+     Jordan since the rain season crosses the new year. The spread matters
+     more than the average: planning on the mean plans for a year that rarely
+     happens.</div>
+    ${chartSeasonRain()}
+   </div>
+   <div class="card"><h3>Frost</h3>
+    <div class="why">Nights at or below 0 °C, by month, per year on average.
+     Reanalysis is a grid-cell average at 2 m, so an open field on a still
+     clear night runs colder than this. Treat it as a floor.</div>
+    ${chartFrost()}
+   </div>`;
+}
+function ingestWeather(rows){
+  const out=[];
+  rows.forEach(r=>{
+    const t=Date.parse(r.date); if(!isFinite(t))return;
+    out.push({d:r.date,t,y:+r.date.slice(0,4),m:+r.date.slice(5,7),
+      tmax:+r.temperature_2m_max, tmin:+r.temperature_2m_min,
+      rain:+r.precipitation_sum||0, et0:+r.et0_fao_evapotranspiration||0,
+      settled:r.source==='era5_archive'});
+  });
+  out.sort((a,b)=>a.t-b.t);
+  WX={rows:out};
+}
+function monthlyAgg(fn){
+  const acc=Array.from({length:12},()=>[]);
+  WX.rows.filter(r=>r.settled).forEach(r=>acc[r.m-1].push(fn(r)));
+  return acc.map(v=>v.length?v.reduce((a,b)=>a+b,0)/v.length:0);
+}
+function chartMonthlyTemp(){
+  const hi=monthlyAgg(r=>r.tmax), lo=monthlyAgg(r=>r.tmin);
+  const yh=Math.max(...hi)+4, yl=Math.min(...lo)-3;
+  const x=scale(0,11,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
+  const p=a=>a.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join('');
+  const band=hi.map((v,i)=>`${x(i)},${y(v)}`).join(' ')+' '+
+             lo.map((v,i)=>`${x(i)},${y(v)}`).reverse().join(' ');
+  return svg(axes(x,y,yl,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(0)+'°')+
+   `<polygon points="${band}" fill="#8b949e" opacity=".12"/>
+    <path d="${p(hi)}" fill="none" stroke="#f85149" stroke-width="1.8"/>
+    <path d="${p(lo)}" fill="none" stroke="#58a6ff" stroke-width="1.8"/>`);
+}
+function chartRainET(){
+  const yrs=new Set(WX.rows.filter(r=>r.settled).map(r=>r.y)).size||1;
+  const rain=Array(12).fill(0), et=Array(12).fill(0);
+  WX.rows.filter(r=>r.settled).forEach(r=>{rain[r.m-1]+=r.rain; et[r.m-1]+=r.et0;});
+  const R=rain.map(v=>v/yrs), E=et.map(v=>v/yrs);
+  const yh=Math.max(...E,...R)*1.1;
+  const x=scale(0,11,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const bw=(W-PAD.l-PAD.r)/14;
+  const bars=R.map((v,i)=>`<rect x="${x(i)-bw/2}" y="${y(v)}" width="${bw}"
+    height="${H-PAD.b-y(v)}" fill="#58a6ff" opacity=".75"/>`).join('');
+  const line=E.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join('');
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})))+bars+
+    `<path d="${line}" fill="none" stroke="#d29922" stroke-width="2"/>`);
+}
+function chartSeasonRain(){
+  const acc={}, days={};
+  WX.rows.filter(r=>r.settled).forEach(r=>{
+    const hy=r.m>=10?r.y:r.y-1;
+    acc[hy]=(acc[hy]||0)+r.rain; days[hy]=(days[hy]||0)+1;
+  });
+  const ys=Object.keys(acc).filter(y=>days[y]>=360).map(Number).sort();
+  if(!ys.length) return '<div class="why">Not enough data.</div>';
+  const vals=ys.map(y=>acc[y]);
+  const yh=Math.max(...vals)*1.1;
+  const x=scale(0,ys.length-1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const bw=(W-PAD.l-PAD.r)/(ys.length+2);
+  const med=median(vals);
+  const bars=ys.map((yr,i)=>`<rect x="${x(i)-bw/2}" y="${y(acc[yr])}" width="${bw*.85}"
+    height="${H-PAD.b-y(acc[yr])}" fill="${acc[yr]<med?'#d29922':'#58a6ff'}" opacity=".8"/>`).join('');
+  const step=Math.ceil(ys.length/8);
+  const xt=ys.map((yr,i)=>({v:i,l:i%step===0?String(yr).slice(2)+'/'+String(yr+1).slice(2):''}));
+  return svg(axes(x,y,0,yh,xt)+bars+
+    `<line class="grid" stroke="#3fb950" stroke-dasharray="4,4" x1="${PAD.l}" y1="${y(med)}"
+      x2="${W-PAD.r}" y2="${y(med)}"/>
+     <text x="${W-PAD.r-4}" y="${y(med)-4}" text-anchor="end" fill="#3fb950">median ${fmt(med)} mm</text>`);
+}
+function chartFrost(){
+  const yrs=new Set(WX.rows.filter(r=>r.settled).map(r=>r.y)).size||1;
+  const c=Array(12).fill(0);
+  WX.rows.filter(r=>r.settled&&r.tmin<=0).forEach(r=>c[r.m-1]++);
+  const per=c.map(v=>v/yrs);
+  const yh=Math.max(...per,1)*1.15;
+  const x=scale(0,11,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const bw=(W-PAD.l-PAD.r)/14;
+  const bars=per.map((v,i)=>`<rect x="${x(i)-bw/2}" y="${y(v)}" width="${bw}"
+    height="${H-PAD.b-y(v)}" fill="#58a6ff" opacity=".8"/>`).join('');
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(1))+bars);
+}
+
+upDo(); render();
+</script>
+</body>
+</html>

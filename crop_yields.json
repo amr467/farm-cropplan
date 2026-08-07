@@ -1,0 +1,165 @@
+{
+  "_meta": {
+    "generated": "2026-08-07T14:59:27",
+    "source": "FAOSTAT bulk download service, QCL domain, Jordan.",
+    "warning": "NATIONAL AVERAGES. Jordan's vegetable output is dominated by the Jordan Valley, warmer and lower than Mafraq, and these pool open field with protected cultivation. A highland open-field plot should expect less. A starting point to overwrite, not a projection."
+  },
+  "crops": {
+    "eggplant": {
+      "kg_per_dunum": 4252.1,
+      "min": 3104.3,
+      "max": 6009.6,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "eggplants (aubergines)",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "sweet_pepper": {
+      "kg_per_dunum": 4220.8,
+      "min": 3088.6,
+      "max": 5197.3,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "chillies and peppers, green",
+      "caveat": "FAOSTAT does not separate sweet from hot pepper.",
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "hot_pepper": {
+      "kg_per_dunum": 4220.8,
+      "min": 3088.6,
+      "max": 5197.3,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "chillies and peppers, green",
+      "caveat": "Same aggregate as sweet pepper. FAOSTAT does not split them.",
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "cauliflower": {
+      "kg_per_dunum": 4285.5,
+      "min": 3242.3,
+      "max": 5271.4,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "cauliflowers and broccoli",
+      "caveat": "FAOSTAT reports cauliflower and broccoli as one item.",
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "broccoli": {
+      "kg_per_dunum": 4285.5,
+      "min": 3242.3,
+      "max": 5271.4,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "cauliflowers and broccoli",
+      "caveat": "Same aggregate as cauliflower. Broccoli usually yields less, so this likely overstates it.",
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "garlic": {
+      "kg_per_dunum": 2354.2,
+      "min": 1813.6,
+      "max": 2576.4,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "garlic",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "watermelon": {
+      "kg_per_dunum": 6060.8,
+      "min": 5393.9,
+      "max": 6620.2,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "watermelons",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "melon": {
+      "kg_per_dunum": 4556.1,
+      "min": 3917.1,
+      "max": 6478.2,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "cantaloupes and other melons",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "squash": {
+      "kg_per_dunum": 2960.0,
+      "min": 2606.9,
+      "max": 3770.5,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "pumpkins, squash and gourds",
+      "caveat": "Includes winter squash and pumpkin, which yield more per hectare than courgette.",
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "green_onion": {
+      "kg_per_dunum": 2225.3,
+      "min": 1393.5,
+      "max": 2822.6,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "onions and shallots, green",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "sweet_corn": {
+      "kg_per_dunum": 3016.7,
+      "min": 1771.2,
+      "max": 4092.9,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "maize (corn), green",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    },
+    "okra": {
+      "kg_per_dunum": 696.3,
+      "min": 516.1,
+      "max": 864.1,
+      "years": [
+        2016,
+        2024
+      ],
+      "n": 9,
+      "faostat_item": "okra",
+      "caveat": null,
+      "source": "FAOSTAT bulk, Crops and livestock products (QCL), Yield, area Jordan. National average."
+    }
+  }
+}

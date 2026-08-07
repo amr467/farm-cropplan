@@ -1,0 +1,337 @@
+{
+  "_meta": {
+    "purpose": "Crop parameters for the Mafraq cash crop planner.",
+    "primary_source": {
+      "citation": "Allen, R.G., Pereira, L.S., Raes, D., Smith, M. (1998). Crop evapotranspiration: Guidelines for computing crop water requirements. FAO Irrigation and Drainage Paper 56. Rome: FAO.",
+      "tables_used": [
+        "Table 11: Lengths of crop development stages",
+        "Table 12: Single (time-averaged) crop coefficients Kc and mean maximum plant heights"
+      ],
+      "url": "https://www.fao.org/4/x0490e/x0490e0b.htm"
+    },
+    "rules": [
+      "Every numeric value carries a 'src' field. 'FAO56-T11' and 'FAO56-T12' mean the value is copied from the cited tables. 'null' means FAO-56 does not cover it and NO substitute has been invented.",
+      "Nothing in this file is a yield, a cost, or a price. Those are user inputs and do not belong in a reference file.",
+      "Kc values in FAO-56 Table 12 are for a SUB-HUMID climate: RHmin about 45%, wind about 2 m/s. Mafraq is semi-arid. Kc_mid and Kc_end MUST be adjusted upward using FAO-56 Eq. 62 and Eq. 65 before use. See _adjustments below.",
+      "Kc_ini in Table 12 assumes typical surface irrigation wetting the whole field. Under drip, FAO-56 Eq. 60 multiplies Kc_ini by fw, the wetted soil fraction. This is a large reduction and must not be skipped.",
+      "Stage lengths are described by FAO-56 itself as indicative only, varying substantially by region, climate and variety. They are starting points to be replaced by local observation or by GDD-derived timing."
+    ],
+    "_adjustments": {
+      "kc_mid_kc_end_climate": {
+        "equation": "Kc = Kc_tab + [0.04(u2 - 2) - 0.004(RHmin - 45)] * (h/3)^0.3",
+        "source": "FAO-56 Eq. 62 (mid-season) and Eq. 65 (late season)",
+        "applies_to_kc_end_only_if": "Kc_end from Table 12 exceeds 0.45. Below that no adjustment is made.",
+        "valid_ranges": "1 <= u2 <= 6 m/s, 20 <= RHmin <= 80 %, 0.1 < h < 10 m",
+        "note": "u2 and RHmin are computed from the site weather series for the actual stage dates, not assumed. RHmin can be approximated from Tdew and Tmax by FAO-56 Eq. 63, or from Tmin by Eq. 64 with a 2 C correction in arid climates per Annex 6."
+      },
+      "kc_ini_drip": {
+        "equation": "Kc_ini = fw * Kc_ini_table",
+        "source": "FAO-56 Eq. 60",
+        "fw_value": null,
+        "fw_note": "fw is the fraction of soil surface wetted. FAO-56 Table 20 gives common ranges; for trickle irrigation an example value of 0.4 is used in FAO-56 Example 26. The correct value depends on emitter spacing, discharge and bed geometry on YOUR field and is left blank deliberately. USER INPUT."
+      }
+    },
+    "kc_ini_group_defaults": {
+      "small_vegetables": {"value": 0.7, "src": "FAO56-T12 group a"},
+      "solanaceae": {"value": 0.6, "src": "FAO56-T12 group b"},
+      "cucurbitaceae": {"value": 0.5, "src": "FAO56-T12 group c"},
+      "cereals": {"value": 0.3, "src": "FAO56-T12 group i"},
+      "note": "FAO-56 footnote 1 to Table 12: these are approximations for planning only. Kc_ini varies between 0.1 and 1.15 depending on wetting interval and evaporative demand, and is more accurately computed from Figures 29/30 or Annex 7 Eq. 7-3."
+    },
+    "user_input_fields": [
+      "expected_yield_kg_per_dunum",
+      "seed_or_transplant_cost",
+      "labour_days_per_dunum",
+      "harvest_labour_per_pick",
+      "number_of_picks",
+      "transport_cost_per_trip",
+      "box_cost_per_unit",
+      "commission_pct",
+      "plant_spacing_m",
+      "row_spacing_m"
+    ]
+  },
+
+  "crops": [
+    {
+      "id": "eggplant",
+      "name_en": "Eggplant",
+      "name_ar": "باذنجان",
+      "fao56_group": "solanaceae",
+      "kc": {
+        "ini": {"value": 0.6, "src": "FAO56-T12 group b"},
+        "mid": {"value": 1.05, "src": "FAO56-T12"},
+        "end": {"value": 0.90, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.8, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 30, "dev": 40, "mid": 40, "late": 20, "total": 130,
+         "plant_date": "October", "region": "Arid Region", "src": "FAO56-T11"},
+        {"ini": 30, "dev": 45, "mid": 40, "late": 25, "total": 140,
+         "plant_date": "May/June", "region": "Mediterranean", "src": "FAO56-T11",
+         "note": "The published table prints the total for this row as 40, which is inconsistent with its own stage lengths summing to 140. Recorded as 140 and flagged rather than silently corrected."}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "frost_note": "Frost sensitive. Specific damage threshold not sourced. USER INPUT or literature.",
+      "market_name_variants_ar": ["اسود رفيع", "اسود عجمي", "اسود كلاسيك"],
+      "market_name_note": "Observed in the GAM bulletin as separate variety listings trading at different prices. Mapping of each listing to this crop must be confirmed by the user."
+    },
+    {
+      "id": "sweet_pepper",
+      "name_en": "Sweet pepper (bell)",
+      "name_ar": "فلفل حلو",
+      "fao56_group": "solanaceae",
+      "kc": {
+        "ini": {"value": 0.6, "src": "FAO56-T12 group b"},
+        "mid": {"value": 1.05, "src": "FAO56-T12",
+                "note": "FAO-56 Table 12 footnote 2: where peppers are grown on stakes reaching 1.5 to 2 m, use 1.15 and increase h accordingly."},
+        "end": {"value": 0.90, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.7, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 25, "dev": 35, "mid": 40, "late": 20, "total": 125,
+         "plant_date": "April/June", "region": "Europe and Mediterranean", "src": "FAO56-T11",
+         "note": "Table gives Lini as 25/30."},
+        {"ini": 30, "dev": 40, "mid": 110, "late": 30, "total": 210,
+         "plant_date": "October", "region": "Arid Region", "src": "FAO56-T11"}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "frost_note": "Frost sensitive. Threshold not sourced.",
+      "heat_note": "Flower drop under sustained high temperature is widely reported but no threshold is taken from FAO-56, which does not cover it. Not quantified here."
+    },
+    {
+      "id": "hot_pepper",
+      "name_en": "Hot pepper",
+      "name_ar": "فلفل حار",
+      "fao56_group": "solanaceae",
+      "kc": {
+        "ini": {"value": 0.6, "src": "FAO56-T12 group b",
+                "note": "Group default only. Hot pepper is NOT listed individually in FAO-56 Table 12."},
+        "mid": {"value": null, "src": null},
+        "end": {"value": null, "src": null}
+      },
+      "height_m": {"value": null, "src": null},
+      "stage_lengths_days": [],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "GAP": "FAO-56 does not cover hot pepper separately. Using sweet pepper values as a proxy is defensible but is a user decision, not a sourced fact. Left blank. Alternative source: Pereira et al. (2021), 'Standard single and basal crop coefficients for vegetable crops', Agricultural Water Management, which extends FAO-56 to vegetables not in the original tables. Not yet consulted.",
+      "market_name_variants_ar": ["فلفل حار"]
+    },
+    {
+      "id": "cauliflower",
+      "name_en": "Cauliflower",
+      "name_ar": "قرنبيط",
+      "fao56_group": "small_vegetables",
+      "kc": {
+        "ini": {"value": 0.7, "src": "FAO56-T12 group a"},
+        "mid": {"value": 1.05, "src": "FAO56-T12"},
+        "end": {"value": 0.95, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.4, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 35, "dev": 50, "mid": 40, "late": 15, "total": 140,
+         "plant_date": "September", "region": "California Desert, USA", "src": "FAO56-T11"},
+        {"ini": 30, "dev": 35, "mid": 90, "late": 40, "total": 195,
+         "plant_date": "Oct/Nov", "region": "Mediterranean", "src": "FAO56-T11",
+         "note": "Listed under 'Crucifers', which FAO-56 footnote 1 defines as including cabbage, cauliflower, broccoli and Brussels sprouts. The wide range across crucifer rows is attributed to varietal and species differences."}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": true,
+      "frost_note": "Brassicas are generally cold tolerant. FAO-56 gives no damage threshold and none is invented here."
+    },
+    {
+      "id": "broccoli",
+      "name_en": "Broccoli",
+      "name_ar": "بروكلي",
+      "fao56_group": "small_vegetables",
+      "kc": {
+        "ini": {"value": 0.7, "src": "FAO56-T12 group a"},
+        "mid": {"value": 1.05, "src": "FAO56-T12"},
+        "end": {"value": 0.95, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.3, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 35, "dev": 45, "mid": 40, "late": 15, "total": 135,
+         "plant_date": "September", "region": "California Desert, USA", "src": "FAO56-T11"},
+        {"ini": 20, "dev": 30, "mid": 20, "late": 10, "total": 80,
+         "plant_date": "April", "region": "Mediterranean", "src": "FAO56-T11",
+         "note": "Crucifers row. Much shorter season."},
+        {"ini": 30, "dev": 35, "mid": 90, "late": 40, "total": 195,
+         "plant_date": "Oct/Nov", "region": "Mediterranean", "src": "FAO56-T11",
+         "note": "Crucifers row."}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": true,
+      "market_name_variants_ar": ["بروكلي"],
+      "market_note": "Present in the GAM bulletin sample, so a price series exists."
+    },
+    {
+      "id": "garlic",
+      "name_en": "Garlic",
+      "name_ar": "ثوم",
+      "fao56_group": "small_vegetables",
+      "kc": {
+        "ini": {"value": 0.7, "src": "FAO56-T12 group a"},
+        "mid": {"value": 1.00, "src": "FAO56-T12"},
+        "end": {"value": 0.70, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.3, "src": "FAO56-T12"},
+      "stage_lengths_days": [],
+      "GAP": "Garlic appears in FAO-56 Table 12 (Kc) but NOT in Table 11 (stage lengths). No stage lengths are available from the primary source and none are invented. Must come from local observation or a secondary source.",
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": true,
+      "storage_note": "Cures and stores naturally, so it is one of the few crops on the list not bound by the no-cold-storage constraint. This changes its market timing options materially."
+    },
+    {
+      "id": "watermelon",
+      "name_en": "Watermelon",
+      "name_ar": "بطيخ",
+      "fao56_group": "cucurbitaceae",
+      "kc": {
+        "ini": {"value": 0.4, "src": "FAO56-T12",
+                "note": "Watermelon has its own Kc_ini of 0.4, lower than the 0.5 group default."},
+        "mid": {"value": 1.00, "src": "FAO56-T12"},
+        "end": {"value": 0.75, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.4, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 20, "dev": 30, "mid": 30, "late": 30, "total": 110,
+         "plant_date": "April", "region": "Italy", "src": "FAO56-T11"},
+        {"ini": 10, "dev": 20, "mid": 20, "late": 30, "total": 80,
+         "plant_date": "Mar/Aug", "region": "Near East (desert)", "src": "FAO56-T11",
+         "note": "Closest listed analogue to the Mafraq site. Table prints the plant date as 'Mat/Aug', read as Mar/Aug."}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false
+    },
+    {
+      "id": "melon",
+      "name_en": "Sweet melon",
+      "name_ar": "شمام",
+      "fao56_group": "cucurbitaceae",
+      "kc": {
+        "ini": {"value": 0.5, "src": "FAO56-T12 group c"},
+        "mid": {"value": 1.05, "src": "FAO56-T12"},
+        "end": {"value": 0.75, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.4, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 25, "dev": 35, "mid": 40, "late": 20, "total": 120,
+         "plant_date": "May", "region": "Mediterranean", "src": "FAO56-T11"},
+        {"ini": 30, "dev": 45, "mid": 65, "late": 20, "total": 160,
+         "plant_date": "Dec/Jan", "region": "Arid Region", "src": "FAO56-T11"},
+        {"ini": 15, "dev": 40, "mid": 65, "late": 15, "total": 135,
+         "plant_date": "August", "region": "California Desert, USA", "src": "FAO56-T11"}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "note": "FAO-56 also lists Cantaloupe separately with Kc_ini 0.5, Kc_mid 0.85, Kc_end 0.60, h 0.3. If the local crop is cantaloupe rather than sweet melon, those are materially lower values and the wrong choice would overstate water use by roughly 20 percent at mid-season."
+    },
+    {
+      "id": "squash",
+      "name_en": "Squash / zucchini",
+      "name_ar": "كوسا",
+      "fao56_group": "cucurbitaceae",
+      "kc": {
+        "ini": {"value": 0.5, "src": "FAO56-T12 group c"},
+        "mid": {"value": 0.95, "src": "FAO56-T12"},
+        "end": {"value": 0.75, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.3, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 25, "dev": 35, "mid": 25, "late": 15, "total": 100,
+         "plant_date": "April; December", "region": "Mediterranean; Arid Region", "src": "FAO56-T11"},
+        {"ini": 20, "dev": 30, "mid": 25, "late": 15, "total": 90,
+         "plant_date": "May/June", "region": "Mediterranean; Europe", "src": "FAO56-T11"}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "note": "FAO-56 lists winter squash and pumpkin separately: Kc_mid 1.00, Kc_end 0.80, h 0.4, lengths 20/30/30/20 (Mar, Aug, Mediterranean) and 25/35/35/25 (June, Europe). Which entry applies depends on the type grown.",
+      "labour_note": "Repeated picking over weeks. Harvest labour is a major cost driver and is a user input."
+    },
+    {
+      "id": "green_onion",
+      "name_en": "Green onion",
+      "name_ar": "بصل أخضر",
+      "fao56_group": "small_vegetables",
+      "kc": {
+        "ini": {"value": 0.7, "src": "FAO56-T12 group a"},
+        "mid": {"value": 1.00, "src": "FAO56-T12"},
+        "end": {"value": 1.00, "src": "FAO56-T12"}
+      },
+      "height_m": {"value": 0.3, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 25, "dev": 30, "mid": 10, "late": 5, "total": 70,
+         "plant_date": "April/May", "region": "Mediterranean", "src": "FAO56-T11"},
+        {"ini": 20, "dev": 45, "mid": 20, "late": 10, "total": 95,
+         "plant_date": "October", "region": "Arid Region", "src": "FAO56-T11"},
+        {"ini": 30, "dev": 55, "mid": 55, "late": 40, "total": 180,
+         "plant_date": "March", "region": "California, USA", "src": "FAO56-T11"}
+      ],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": true,
+      "market_name_variants_ar": ["بصل اخضر"],
+      "market_note": "Present in the GAM bulletin sample.",
+      "note": "70 day season at the short end. Short cycles allow multiple plantings and staggered harvest into different price windows, which is a scheduling option the planner should expose."
+    },
+    {
+      "id": "sweet_corn",
+      "name_en": "Sweet corn",
+      "name_ar": "ذرة سكرية",
+      "fao56_group": "cereals",
+      "kc": {
+        "ini": {"value": 0.3, "src": "FAO56-T12 group i"},
+        "mid": {"value": 1.15, "src": "FAO56-T12"},
+        "end": {"value": 1.05, "src": "FAO56-T12",
+                "note": "FAO-56 Table 12 footnote 12: this Kc_end applies if harvested fresh for human consumption. Use the field maize value if allowed to mature and dry."}
+      },
+      "height_m": {"value": 1.5, "src": "FAO56-T12"},
+      "stage_lengths_days": [
+        {"ini": 20, "dev": 25, "mid": 25, "late": 10, "total": 80,
+         "plant_date": "May/June", "region": "Mediterranean", "src": "FAO56-T11"},
+        {"ini": 20, "dev": 30, "mid": 50, "late": 10, "total": 90,
+         "plant_date": "Oct/Dec", "region": "Arid Climate", "src": "FAO56-T11",
+         "note": "Table prints mid as '50/30'; the alternative 30 gives the stated 90 day total."},
+        {"ini": 20, "dev": 40, "mid": 70, "late": 10, "total": 140,
+         "plant_date": "January", "region": "California Desert, USA", "src": "FAO56-T11"}
+      ],
+      "gdd_base_c": null,
+      "gdd_base_note": "FAO-56 Table 11 footnote 2 states that spring planting of grain maize can be presumed when the 10-day running mean of daily air temperature reaches 13 C. That is a planting trigger, not a GDD base temperature, and is not used as one here.",
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "water_note": "Highest Kc_mid on this list at 1.15, combined with a tall canopy that raises the climate adjustment in Eq. 62. Likely the most water-hungry option per dunum. Ranking by margin per cubic metre will penalise it heavily."
+    },
+    {
+      "id": "okra",
+      "name_en": "Okra",
+      "name_ar": "بامية",
+      "fao56_group": null,
+      "kc": {
+        "ini": {"value": null, "src": null},
+        "mid": {"value": null, "src": null},
+        "end": {"value": null, "src": null}
+      },
+      "height_m": {"value": null, "src": null},
+      "stage_lengths_days": [],
+      "gdd_base_c": null,
+      "gdd_to_maturity": null,
+      "frost_tolerant": false,
+      "GAP": "Okra does not appear in FAO-56 Table 11 or Table 12 at all, in any crop group. No values, no group default, no proxy. Alternative source: Pereira et al. (2021), Agricultural Water Management, which adds vegetables absent from FAO-56. Not yet consulted.",
+      "market_name_variants_ar": ["باميا"],
+      "market_note": "Present in the GAM bulletin sample, so the price series exists even though the agronomy does not.",
+      "labour_note": "Requires repeated picking over many weeks. Harvest labour likely dominates the cost structure."
+    }
+  ]
+}

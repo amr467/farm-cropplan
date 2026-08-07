@@ -1,0 +1,19 @@
+# Scraped bulletins. About 2,900 files, roughly 700 MB. These are your
+# insurance against a parser bug, but they serve that purpose sitting on your
+# own disk. Keeping them here would make the repo unusable to clone.
+raw/
+
+# Intermediate CSVs. Large, and reproducible from raw/ by re-running the
+# scripts. The app never reads them; it reads data/*.json.
+gam_prices_local.csv
+gam_prices_clean.csv
+
+# Scraper progress. Local to whichever machine is doing the fetching.
+state/
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+Thumbs.db
