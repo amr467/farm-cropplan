@@ -728,219 +728,331 @@ function median(a){ if(!a.length)return null; const s=[...a].sort((p,q)=>p-q);
   const m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
 function quantile(a,q){ if(!a.length)return null; const s=[...a].sort((p,q2)=>p-q2);
   const i=(s.length-1)*q, lo=Math.floor(i); return s[lo]+(s[Math.min(lo+1,s.length-1)]-s[lo])*(i-lo); }
+/* ============================================================ DATA LOADING
+   The app fetches data/ when served over HTTP. Opened from disk, fetch is
+   blocked, so the file pickers stay as a fallback.                        */
+const DAY=864e5, WEEK=7*DAY;
+async function getJSON(path){
+  const r=await fetch(path,{cache:'no-cache'});
+  if(!r.ok) throw new Error(path+' '+r.status);
+  return r.json();
+}
+function staleBanner(meta){
+  if(!meta||!meta.generated) return '';
+  const age=Math.floor((Date.now()-Date.parse(meta.generated))/DAY);
+  if(age<3) return '';
+  return `<div class="gap"><b>Data is ${age} days old.</b> The daily job may
+    have stopped. Last built ${meta.generated.slice(0,10)}.</div>`;
+}
 
 /* ============================================================ PRICES TAB */
-let PRICE=null, priceItem=null, priceYears=5, priceZoom=null;
-function renderPrices(){
+let PIDX=null, PMETA=null, PSER=null, priceId=null, priceYears=5, priceZoom=null;
+
+async function renderPrices(){
   const el=document.getElementById('pricesBody');
-  if(!PRICE){
-    el.innerHTML=`<div class="card"><h3>Price history</h3>
-      <div class="why">Load <code>gam_prices_clean.csv</code>, the output of
-      clean_prices.py. Only rows flagged usable are charted; superseded
-      duplicates and detected typos are left out.</div>
-      ${fileInput('pf')}</div>`;
-    document.getElementById('pf').onchange=e=>{
-      const f=e.target.files[0]; if(!f)return;
-      el.innerHTML=`<div class="card"><div class="why">Reading ${(f.size/1e6).toFixed(1)} MB…</div></div>`;
-      const r=new FileReader();
-      r.onload=()=>{ ingestPrices(parseCSV(r.result)); renderPrices(); };
-      r.readAsText(f);
-    };
-    return;
+  if(!PIDX){
+    el.innerHTML=`<div class="card"><div class="why">Loading price data…</div></div>`;
+    try{
+      PIDX=await getJSON('data/prices_index.json');
+      try{ PMETA=await getJSON('data/meta.json'); }catch(e){}
+    }catch(e){
+      el.innerHTML=`<div class="card"><h3>Price history</h3>
+        <div class="why">Could not load <code>data/prices_index.json</code>.
+        That is expected if you opened this page from disk rather than over
+        the web, since browsers block local file requests. Load the cleaned
+        CSV instead, or open the published site.</div>
+        <div class="drop"><b>Load gam_prices_clean.csv</b>
+        Reads in your browser, nothing is uploaded.<br><br>
+        <input type="file" accept=".csv" id="pf" style="width:auto"></div></div>`;
+      document.getElementById('pf').onchange=ev=>{
+        const f=ev.target.files[0]; if(!f)return;
+        el.innerHTML=`<div class="card"><div class="why">Reading ${(f.size/1e6).toFixed(1)} MB…</div></div>`;
+        const r=new FileReader();
+        r.onload=()=>{ ingestCSV(parseCSV(r.result)); renderPrices(); };
+        r.readAsText(f);
+      };
+      return;
+    }
   }
-  const items=[...PRICE.byItem.keys()].sort((a,b)=>PRICE.byItem.get(b).length-PRICE.byItem.get(a).length);
-  if(!priceItem) priceItem=items[0];
-  const rows=PRICE.byItem.get(priceItem)||[];
+  if(!priceId) priceId=PIDX.series[0].id;
+  const meta=PIDX.series.find(s=>s.id===priceId);
+  if(!PSER||PSER.id!==priceId){
+    try{ PSER=await getJSON(`data/prices/${priceId}.json`); }
+    catch(e){ el.innerHTML=`<div class="card"><div class="why">Could not load that series.</div></div>`; return; }
+  }
+  drawPrices(el,meta);
+}
+
+function drawPrices(el,meta){
+  const mapped=PIDX.series.filter(s=>s.mapped), raw=PIDX.series.filter(s=>!s.mapped);
   el.innerHTML=`
+   ${staleBanner(PMETA)}
    <div class="card">
-    <select class="wide" onchange="priceItem=this.value;renderPrices()">
-     ${items.map(i=>`<option ${i===priceItem?'selected':''}>${i}</option>`).join('')}
+    <select class="wide" onchange="priceId=this.value;PSER=null;priceZoom=null;renderPrices()">
+     ${mapped.length?`<optgroup label="Crops">${mapped.map(s=>
+        `<option value="${s.id}" ${s.id===priceId?'selected':''}>${s.name}</option>`).join('')}</optgroup>`:''}
+     <optgroup label="${mapped.length?'Unmapped bulletin items':'Bulletin items'}">
+      ${raw.map(s=>`<option value="${s.id}" ${s.id===priceId?'selected':''}>${s.name} · ${s.days}d</option>`).join('')}
+     </optgroup>
     </select>
-    <div class="why" style="margin-top:8px">${rows.length} usable observations,
-     ${PRICE.span[0]} to ${PRICE.span[1]}. Prices are fils per kg as published
-     by Greater Amman Municipality. <b>Wholesale, not farmgate.</b></div>
+    <div class="why" style="margin-top:8px">${meta.days} trading days,
+     ${meta.first} to ${meta.last}. Median ${fmt(meta.median_price)} fils/kg.
+     ${PSER.members&&PSER.members.length>1?`Merged from ${PSER.members.length} bulletin names.`:''}
+     <b>Wholesale at the Amman central market, not farmgate.</b></div>
+    ${!mapped.length?`<div class="gap">No crop mapping yet. Fill the crop_id
+      column in item_mapping.csv and re-run aggregate.py to merge variety
+      listings into crops.</div>`:''}
    </div>
+
    <div class="card"><h3>Price over time</h3>
     <div class="why">Weekly median of the modal price (سعر الأغلب), with the
-     high and low band behind it. The band is grade spread on the same day,
-     not uncertainty.</div>
+     low-to-high band behind it. The band is grade spread on the same day, not
+     uncertainty.</div>
     <div class="rng">${[1,3,5,11].map(y=>`<button class="btn ${(!priceZoom&&priceYears===y)?'on':''}"
-      onclick="priceZoom=null;priceYears=${y};renderPrices()">${y===11?'All':y+'y'}</button>`).join('')}
+      onclick="priceZoom=null;priceYears=${y};drawPrices(document.getElementById('pricesBody'),${JSON.stringify(meta).replace(/"/g,'&quot;')})">${y===11?'All':y+'y'}</button>`).join('')}
       ${priceZoom?`<button class="btn on" onclick="priceZoom=null;renderPrices()">✕ zoomed</button>`
-                 :`<span style="font-size:10px;color:var(--tx3);align-self:center">drag on the chart to zoom</span>`}</div>
-    ${chartSeries(rows,priceYears)}
+                 :`<span style="font-size:10px;color:var(--tx3);align-self:center">drag to zoom</span>`}</div>
+    ${chartWeekly()}
     <div class="legend"><span><i style="background:#3fb950"></i>modal</span>
      <span><i style="background:#1f6feb;opacity:.5"></i>low–high band</span></div>
    </div>
+
    <div class="card"><h3>Season shape</h3>
-    <div class="why">Every year overlaid by week of year. The band is the 25th
-     to 75th percentile across years, the line is the median. This is what a
-     harvest window has historically paid, and it is the honest basis for a
-     forecast at planting time.</div>
-    ${chartSeasonal(rows)}
+    <div class="why">All years overlaid by week. Dark band is the middle half
+     of observations, light band the 10th to 90th percentile, line the median.
+     This is what a harvest window has historically paid, and it is the honest
+     basis for an expectation at planting time.</div>
+    ${chartSeasonal()}
+    <div class="legend"><span><i style="background:#3fb950"></i>median</span>
+     <span><i style="background:#3fb950;opacity:.35"></i>25–75%</span>
+     <span><i style="background:#3fb950;opacity:.15"></i>10–90%</span></div>
    </div>
+
    <div class="card"><h3>Arrivals</h3>
-    <div class="why">Tonnes entering the market, by week of year, median across
-     years. Price without quantity is half the picture: a high price on two
-     tonnes is a different fact from a high price on two hundred.</div>
-    ${chartArrivals(rows)}
+    <div class="why">Tonnes entering the market by week, median across years.
+     Price without quantity is half the picture: a high price on two tonnes is
+     a different fact from a high price on two hundred. This is also where you
+     see the glut you would be planting into.</div>
+    ${chartArrivals()}
    </div>`;
 }
-function ingestPrices(rows){
-  const byItem=new Map(); let lo='9999',hi='0';
-  rows.forEach(r=>{
-    if(r.usable!=='1') return;
-    const m=+r.price_mode; if(!isFinite(m)) return;
-    const d=r.date; if(d<lo)lo=d; if(d>hi)hi=d;
-    if(!byItem.has(r.item)) byItem.set(r.item,[]);
-    byItem.get(r.item).push({d, t:Date.parse(d), mode:m,
-      lo:+r.price_low, hi:+r.price_high, q:+r.quantity||0});
-  });
-  byItem.forEach(v=>v.sort((a,b)=>a.t-b.t));
-  PRICE={byItem, span:[lo,hi]};
-}
-function weekOf(ts){ const dt=new Date(ts);
-  const s=Date.UTC(dt.getUTCFullYear(),0,1);
-  return Math.min(52,Math.floor((ts-s)/6048e5)); }
 
-function chartSeries(rows,years){
-  if(!rows.length) return '<div class="why">No data.</div>';
-  const cut=rows[rows.length-1].t - years*365.25*864e5;
-  const use=priceZoom
-    ? rows.filter(r=>r.t>=priceZoom[0]&&r.t<=priceZoom[1])
-    : rows.filter(r=>r.t>=cut);
-  if(use.length<2) return '<div class="why">Not enough data in this range.</div>';
-  // weekly buckets
-  const buck=new Map();
-  use.forEach(r=>{ const k=Math.floor(r.t/6048e5);
-    if(!buck.has(k))buck.set(k,{m:[],l:[],h:[]});
-    const b=buck.get(k); b.m.push(r.mode); b.l.push(r.lo); b.h.push(r.hi); });
-  const pts=[...buck.entries()].sort((a,b)=>a[0]-b[0]).map(([k,b])=>({
-    t:k*6048e5, m:median(b.m), l:median(b.l), h:median(b.h)}));
-  const t0=pts[0].t, t1=pts[pts.length-1].t;
-  const yh=Math.max(...pts.map(p=>p.h))*1.05, yl=0;
-  const x=scale(t0,t1,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
-  const band=pts.map(p=>`${x(p.t)},${y(p.h)}`).join(' ')+' '+
-             pts.slice().reverse().map(p=>`${x(p.t)},${y(p.l)}`).join(' ');
-  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.t)},${y(p.m)}`).join('');
-  const xt=[]; const yrs=new Date(t1).getUTCFullYear()-new Date(t0).getUTCFullYear();
-  for(let Y=new Date(t0).getUTCFullYear();Y<=new Date(t1).getUTCFullYear();Y++){
-    const v=Date.UTC(Y,0,1); if(v>=t0&&v<=t1&&(yrs<8||Y%2===0)) xt.push({v,l:Y});
-  }
-  return svg(axes(x,y,yl,yh,xt)+
+/* CSV fallback: reshape a raw clean CSV into the same structure the JSON has */
+function ingestCSV(rows){
+  const by=new Map();
+  rows.forEach(r=>{
+    if(r.usable!=='1')return;
+    const m=+r.price_mode; if(!isFinite(m))return;
+    if(!by.has(r.item)) by.set(r.item,[]);
+    by.get(r.item).push({t:Date.parse(r.date),m,l:+r.price_low,h:+r.price_high,q:+r.quantity||0});
+  });
+  const series=[];
+  let n=0;
+  by.forEach((v,name)=>{
+    if(v.length<150) return;
+    v.sort((a,b)=>a.t-b.t);
+    const wk=new Map(), soy=new Map();
+    v.forEach(o=>{
+      const w=Math.floor(o.t/WEEK);
+      if(!wk.has(w))wk.set(w,{m:[],l:[],h:[],q:[]});
+      const b=wk.get(w); b.m.push(o.m); b.l.push(o.l); b.h.push(o.h); if(o.q)b.q.push(o.q);
+      const d=new Date(o.t), woy=Math.min(52,Math.floor((o.t-Date.UTC(d.getUTCFullYear(),0,1))/WEEK));
+      if(!soy.has(woy))soy.set(woy,{m:[],q:[]});
+      soy.get(woy).m.push(o.m); if(o.q)soy.get(woy).q.push(o.q);
+    });
+    const id='s'+(n++);
+    series.push({id,name,days:v.length,
+      first:new Date(v[0].t).toISOString().slice(0,10),
+      last:new Date(v[v.length-1].t).toISOString().slice(0,10),
+      median_price:median(v.map(o=>o.m)),mapped:false,
+      _weekly:[...wk.entries()].sort((a,b)=>a[0]-b[0]).map(([w,b])=>
+        [w,median(b.m),median(b.l),median(b.h),median(b.q),b.m.length]),
+      _seasonal:[...soy.entries()].sort((a,b)=>a[0]-b[0])
+        .filter(([,b])=>b.m.length>=4).map(([w,b])=>
+        [w,quantile(b.m,.1),quantile(b.m,.25),median(b.m),quantile(b.m,.75),
+         quantile(b.m,.9),median(b.q),b.m.length])});
+  });
+  series.sort((a,b)=>b.days-a.days);
+  PIDX={series};
+  priceId=series[0]?series[0].id:null;
+  const s=series.find(x=>x.id===priceId);
+  PSER=s?{id:s.id,name:s.name,members:[s.name],weekly:s._weekly,seasonal:s._seasonal}:null;
+  const orig=renderPrices;
+  window.renderPrices=async function(){
+    const el=document.getElementById('pricesBody');
+    const m=PIDX.series.find(x=>x.id===priceId);
+    const src=PIDX.series.find(x=>x.id===priceId);
+    PSER={id:src.id,name:src.name,members:[src.name],weekly:src._weekly,seasonal:src._seasonal};
+    drawPrices(el,m);
+  };
+}
+
+function chartWeekly(){
+  const all=PSER.weekly;
+  if(!all||all.length<2) return '<div class="why">Not enough data.</div>';
+  const lastT=all[all.length-1][0]*WEEK;
+  const rows=priceZoom
+    ? all.filter(w=>w[0]*WEEK>=priceZoom[0]&&w[0]*WEEK<=priceZoom[1])
+    : all.filter(w=>w[0]*WEEK>=lastT-priceYears*365.25*DAY);
+  if(rows.length<2) return '<div class="why">Nothing in this range.</div>';
+  const pts=rows.map(w=>({k:w[0]*WEEK,v:w[1],l:w[2],h:w[3],q:w[4],n:w[5]}));
+  const t0=pts[0].k, t1=pts[pts.length-1].k;
+  const yh=Math.max(...pts.map(p=>p.h??p.v))*1.05;
+  const x=scale(t0,t1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const band=pts.map(p=>`${x(p.k)},${y(p.h??p.v)}`).join(' ')+' '+
+             pts.slice().reverse().map(p=>`${x(p.k)},${y(p.l??p.v)}`).join(' ');
+  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.k)},${y(p.v)}`).join('');
+  const xt=[]; const y0=new Date(t0).getUTCFullYear(), y1=new Date(t1).getUTCFullYear();
+  for(let Y=y0;Y<=y1;Y++){ const v=Date.UTC(Y,0,1);
+    if(v>=t0&&v<=t1&&(y1-y0<8||Y%2===0)) xt.push({v,l:Y}); }
+  return svg(axes(x,y,0,yh,xt)+
     `<polygon points="${band}" fill="#1f6feb" opacity=".22"/>
      <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.6"/>`,
-    {pts:pts.map(p=>({k:p.t,v:p.m,l:p.l,h:p.h})), x, y, zoom:(a,b)=>{
-       priceZoom=[a,b]; renderPrices();
-     },
-     label:p=>`<b>${new Date(p.k).toISOString().slice(0,10)}</b><br>
-       modal ${fmt(p.v)} · low ${fmt(p.l)} · high ${fmt(p.h)} fils/kg`});
+    {pts,x,y,zoom:(a,b)=>{priceZoom=[a,b];renderPrices();},
+     label:p=>`<b>week of ${new Date(p.k).toISOString().slice(0,10)}</b><br>
+       modal ${fmt(p.v)} · ${fmt(p.l)}–${fmt(p.h)} fils/kg<br>
+       ${p.q?fmt(p.q,1)+' t/day median · ':''}<span style="color:var(--tx3)">${p.n} days</span>`});
 }
-function chartSeasonal(rows){
-  if(rows.length<50) return '<div class="why">Not enough data.</div>';
-  const byWeek=Array.from({length:53},()=>[]);
-  rows.forEach(r=>byWeek[weekOf(r.t)].push(r.mode));
-  const pts=byWeek.map((v,w)=>({w, m:median(v), a:quantile(v,.25), b:quantile(v,.75), n:v.length}))
-                  .filter(p=>p.n>=4);
-  if(pts.length<10) return '<div class="why">Not enough data.</div>';
-  const yh=Math.max(...pts.map(p=>p.b))*1.08, yl=0;
-  const x=scale(0,52,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
-  const band=pts.map(p=>`${x(p.w)},${y(p.b)}`).join(' ')+' '+
-             pts.slice().reverse().map(p=>`${x(p.w)},${y(p.a)}`).join(' ');
-  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.w)},${y(p.m)}`).join('');
-  const xt=MONTH.map((l,i)=>({v:i*52/12+2,l}));
-  return svg(axes(x,y,yl,yh,xt)+
-    `<polygon points="${band}" fill="#3fb950" opacity=".18"/>
+
+function chartSeasonal(){
+  const s=PSER.seasonal;
+  if(!s||s.length<10) return '<div class="why">Not enough data.</div>';
+  const pts=s.map(r=>({k:r[0],p10:r[1],p25:r[2],v:r[3],p75:r[4],p90:r[5],q:r[6],n:r[7]}));
+  const yh=Math.max(...pts.map(p=>p.p90))*1.08;
+  const x=scale(0,52,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const poly=(a,b)=>pts.map(p=>`${x(p.k)},${y(p[a])}`).join(' ')+' '+
+                    pts.slice().reverse().map(p=>`${x(p.k)},${y(p[b])}`).join(' ');
+  const line=pts.map((p,i)=>`${i?'L':'M'}${x(p.k)},${y(p.v)}`).join('');
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i*52/12+2,l})))+
+    `<polygon points="${poly('p90','p10')}" fill="#3fb950" opacity=".13"/>
+     <polygon points="${poly('p75','p25')}" fill="#3fb950" opacity=".22"/>
      <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.8"/>`,
-    {pts:pts.map(p=>({k:p.w,v:p.m,a:p.a,b:p.b,n:p.n})), x, y,
-     label:p=>{const dt=new Date(Date.UTC(2001,0,1+p.k*7));
-       return `<b>week ${p.k+1} · ${MONTH[dt.getUTCMonth()]}</b><br>
+    {pts,x,y,label:p=>{
+      const d=new Date(Date.UTC(2001,0,1+p.k*7));
+      return `<b>week ${p.k+1} · ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}</b><br>
        median ${fmt(p.v)} fils/kg<br>
-       middle half ${fmt(p.a)}–${fmt(p.b)}<br>
+       middle half ${fmt(p.p25)}–${fmt(p.p75)}<br>
+       10–90% ${fmt(p.p10)}–${fmt(p.p90)}<br>
        <span style="color:var(--tx3)">${p.n} observations</span>`;}});
 }
-function chartArrivals(rows){
-  const byWeek=Array.from({length:53},()=>[]);
-  rows.forEach(r=>{ if(r.q>0) byWeek[weekOf(r.t)].push(r.q); });
-  const pts=byWeek.map((v,w)=>({w,m:median(v)||0,n:v.length})).filter(p=>p.n>=4);
+
+function chartArrivals(){
+  const s=PSER.seasonal;
+  if(!s) return '<div class="why">No quantity data.</div>';
+  const pts=s.filter(r=>r[6]).map(r=>({k:r[0],v:r[6],n:r[7]}));
   if(pts.length<10) return '<div class="why">No quantity data.</div>';
-  const yh=Math.max(...pts.map(p=>p.m))*1.1;
+  const yh=Math.max(...pts.map(p=>p.v))*1.12;
   const x=scale(0,52,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
-  const bw=(W-PAD.l-PAD.r)/54;
-  const bars=pts.map(p=>`<rect x="${x(p.w)-bw/2}" y="${y(p.m)}" width="${bw*.85}"
-    height="${H-PAD.b-y(p.m)}" fill="#a78bfa" opacity=".7"/>`).join('');
-  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i*52/12+2,l})),v=>fmt(v))+bars);
+  const bw=(W-PAD.l-PAD.r)/56;
+  const bars=pts.map(p=>`<rect x="${x(p.k)-bw/2}" y="${y(p.v)}" width="${bw*.85}"
+    height="${H-PAD.b-y(p.v)}" fill="#a78bfa" opacity=".72"/>`).join('');
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i*52/12+2,l})))+bars,
+    {pts,x,y,label:p=>{
+      const d=new Date(Date.UTC(2001,0,1+p.k*7));
+      return `<b>week ${p.k+1} · ${MONTH[d.getUTCMonth()]}</b><br>
+        ${fmt(p.v,1)} tonnes/day median`;}});
 }
 
 /* ============================================================ WEATHER TAB */
 let WX=null;
-function renderWeather(){
+async function renderWeather(){
   const el=document.getElementById('weatherBody');
   if(!WX){
-    el.innerHTML=`<div class="card"><h3>Weather history</h3>
-      <div class="why">Load <code>weather_daily.csv</code> from
-      weather_fetch.py. ERA5 reanalysis at 32.5N 36.2E, 680 m.</div>
-      ${fileInput('wf')}</div>`;
-    document.getElementById('wf').onchange=e=>{
-      const f=e.target.files[0]; if(!f)return;
-      const r=new FileReader();
-      r.onload=()=>{ ingestWeather(parseCSV(r.result)); renderWeather(); };
-      r.readAsText(f);
-    };
-    return;
+    el.innerHTML=`<div class="card"><div class="why">Loading weather…</div></div>`;
+    try{ WX=await getJSON('data/weather.json'); }
+    catch(e){
+      el.innerHTML=`<div class="card"><h3>Weather history</h3>
+        <div class="why">Could not load <code>data/weather.json</code>.
+        Expected when opening from disk. Load weather_daily.csv instead.</div>
+        <div class="drop"><b>Load weather_daily.csv</b><br><br>
+        <input type="file" accept=".csv" id="wf" style="width:auto"></div></div>`;
+      document.getElementById('wf').onchange=ev=>{
+        const f=ev.target.files[0]; if(!f)return;
+        const r=new FileReader();
+        r.onload=()=>{ WX=weatherFromCSV(parseCSV(r.result)); renderWeather(); };
+        r.readAsText(f);
+      };
+      return;
+    }
   }
   el.innerHTML=`
-   <div class="card"><div class="why">${WX.rows.length} days,
-    ${WX.rows[0].d} to ${WX.rows[WX.rows.length-1].d}. ERA5 via Open-Meteo.
-    The last few days are preliminary and get revised.</div></div>
+   <div class="card"><div class="why">${WX.daily.length.toLocaleString()} days,
+    ${WX.first} to ${WX.last}. ERA5 reanalysis at ${WX.site.lat}°N
+    ${WX.site.lon}°E, ${WX.site.elevation_m} m. ${WX.note}</div></div>
+
    <div class="card"><h3>Monthly climatology</h3>
-    <div class="why">Mean daily maximum and minimum by month. The gap between
-     them widens in summer, which is what drives evaporative demand.</div>
+    <div class="why">Mean daily maximum and minimum by month across
+     ${WX.complete_years.length} complete years. The widening gap in summer is
+     what drives evaporative demand.</div>
     ${chartMonthlyTemp()}
     <div class="legend"><span><i style="background:#f85149"></i>mean daily max</span>
      <span><i style="background:#58a6ff"></i>mean daily min</span></div>
    </div>
+
    <div class="card"><h3>Rain against evaporative demand</h3>
-    <div class="why">Monthly rainfall and reference ET0 on the same axis. The
-     distance between them is what irrigation has to cover. Note that summer
-     rain is effectively zero while demand peaks.</div>
+    <div class="why">Monthly rainfall and reference ET0 on one axis. The gap
+     is what irrigation must cover. Summer rain is effectively zero exactly
+     when demand peaks, which is why a summer crop costs several times the
+     water of a winter one.</div>
     ${chartRainET()}
     <div class="legend"><span><i style="background:#58a6ff"></i>rainfall</span>
      <span><i style="background:#d29922"></i>reference ET0</span></div>
    </div>
+
    <div class="card"><h3>Season rainfall, year by year</h3>
     <div class="why">Totals over October to September, the right boundary for
-     Jordan since the rain season crosses the new year. The spread matters
-     more than the average: planning on the mean plans for a year that rarely
-     happens.</div>
+     Jordan since the rain season crosses the new year. The spread matters more
+     than the average: planning on the mean plans for a year that rarely
+     happens. Amber bars are below-median seasons.</div>
     ${chartSeasonRain()}
    </div>
+
    <div class="card"><h3>Frost</h3>
-    <div class="why">Nights at or below 0 °C, by month, per year on average.
+    <div class="why">Nights at or below 0 °C by month, per year on average.
      Reanalysis is a grid-cell average at 2 m, so an open field on a still
-     clear night runs colder than this. Treat it as a floor.</div>
+     clear night runs colder than this. Treat it as a floor, not a ceiling.</div>
     ${chartFrost()}
    </div>`;
 }
-function ingestWeather(rows){
-  const out=[];
+
+function weatherFromCSV(rows){
+  const daily=[], byM={}, hy={};
   rows.forEach(r=>{
     const t=Date.parse(r.date); if(!isFinite(t))return;
-    out.push({d:r.date,t,y:+r.date.slice(0,4),m:+r.date.slice(5,7),
-      tmax:+r.temperature_2m_max, tmin:+r.temperature_2m_min,
-      rain:+r.precipitation_sum||0, et0:+r.et0_fao_evapotranspiration||0,
-      settled:r.source==='era5_archive'});
+    const tmax=+r.temperature_2m_max, tmin=+r.temperature_2m_min;
+    if(!isFinite(tmax))return;
+    const m=+r.date.slice(5,7), Y=+r.date.slice(0,4);
+    const rain=+r.precipitation_sum||0, et0=+r.et0_fao_evapotranspiration||0;
+    const settled=r.source==='era5_archive'?1:0;
+    daily.push([Math.round(t/DAY),tmax,tmin,rain,et0,settled]);
+    if(settled){
+      (byM[m]=byM[m]||{tmax:[],tmin:[],rain:0,et0:0,frost:0,yrs:new Set()});
+      byM[m].tmax.push(tmax); byM[m].tmin.push(tmin);
+      byM[m].rain+=rain; byM[m].et0+=et0; byM[m].yrs.add(Y);
+      if(tmin<=0)byM[m].frost++;
+      const h=m>=10?Y:Y-1; hy[h]=(hy[h]||0)+rain;
+    }
   });
-  out.sort((a,b)=>a.t-b.t);
-  WX={rows:out};
+  const yrs=new Set(); Object.values(byM).forEach(b=>b.yrs.forEach(y=>yrs.add(y)));
+  const nY=yrs.size||1;
+  const monthly=[];
+  for(let m=1;m<=12;m++){
+    const b=byM[m]||{tmax:[0],tmin:[0],rain:0,et0:0,frost:0};
+    monthly.push({month:m,
+      tmax:b.tmax.reduce((a,c)=>a+c,0)/b.tmax.length,
+      tmin:b.tmin.reduce((a,c)=>a+c,0)/b.tmin.length,
+      rain:b.rain/nY, et0:b.et0/nY, frost_nights:b.frost/nY});
+  }
+  return {site:{lat:32.5,lon:36.2,elevation_m:680},
+    first:rows[0].date,last:rows[rows.length-1].date,
+    complete_years:[...yrs].sort(),daily,monthly,
+    seasonal_rain:Object.entries(hy).map(([s,v])=>({season:+s,rain:v}))
+      .sort((a,b)=>a.season-b.season).slice(1,-1),
+    note:'Loaded from CSV in the browser.'};
 }
-function monthlyAgg(fn){
-  const acc=Array.from({length:12},()=>[]);
-  WX.rows.filter(r=>r.settled).forEach(r=>acc[r.m-1].push(fn(r)));
-  return acc.map(v=>v.length?v.reduce((a,b)=>a+b,0)/v.length:0);
-}
+
 function chartMonthlyTemp(){
-  const hi=monthlyAgg(r=>r.tmax), lo=monthlyAgg(r=>r.tmin);
+  const hi=WX.monthly.map(m=>m.tmax), lo=WX.monthly.map(m=>m.tmin);
   const yh=Math.max(...hi)+4, yl=Math.min(...lo)-3;
   const x=scale(0,11,PAD.l,W-PAD.r), y=scale(yl,yh,H-PAD.b,PAD.t);
   const p=a=>a.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join('');
@@ -949,55 +1061,53 @@ function chartMonthlyTemp(){
   return svg(axes(x,y,yl,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(0)+'°')+
    `<polygon points="${band}" fill="#8b949e" opacity=".12"/>
     <path d="${p(hi)}" fill="none" stroke="#f85149" stroke-width="1.8"/>
-    <path d="${p(lo)}" fill="none" stroke="#58a6ff" stroke-width="1.8"/>`);
+    <path d="${p(lo)}" fill="none" stroke="#58a6ff" stroke-width="1.8"/>`,
+   {pts:WX.monthly.map((m,i)=>({k:i,v:m.tmax,lo:m.tmin})),x,y,
+    label:p=>`<b>${MONTH[p.k]}</b><br>mean max ${p.v.toFixed(1)}°C<br>mean min ${p.lo.toFixed(1)}°C`});
 }
 function chartRainET(){
-  const yrs=new Set(WX.rows.filter(r=>r.settled).map(r=>r.y)).size||1;
-  const rain=Array(12).fill(0), et=Array(12).fill(0);
-  WX.rows.filter(r=>r.settled).forEach(r=>{rain[r.m-1]+=r.rain; et[r.m-1]+=r.et0;});
-  const R=rain.map(v=>v/yrs), E=et.map(v=>v/yrs);
-  const yh=Math.max(...E,...R)*1.1;
+  const R=WX.monthly.map(m=>m.rain), E=WX.monthly.map(m=>m.et0);
+  const yh=Math.max(...E,...R)*1.12;
   const x=scale(0,11,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
-  const bw=(W-PAD.l-PAD.r)/14;
+  const bw=(W-PAD.l-PAD.r)/15;
   const bars=R.map((v,i)=>`<rect x="${x(i)-bw/2}" y="${y(v)}" width="${bw}"
     height="${H-PAD.b-y(v)}" fill="#58a6ff" opacity=".75"/>`).join('');
   const line=E.map((v,i)=>`${i?'L':'M'}${x(i)},${y(v)}`).join('');
   return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})))+bars+
-    `<path d="${line}" fill="none" stroke="#d29922" stroke-width="2"/>`);
+    `<path d="${line}" fill="none" stroke="#d29922" stroke-width="2"/>`,
+    {pts:WX.monthly.map((m,i)=>({k:i,v:m.et0,rain:m.rain})),x,y,
+     label:p=>`<b>${MONTH[p.k]}</b><br>rain ${fmt(p.rain)} mm<br>
+       ET0 ${fmt(p.v)} mm<br><span style="color:var(--tx3)">shortfall
+       ${fmt(p.v-p.rain)} mm = m³/dunum</span>`});
 }
 function chartSeasonRain(){
-  const acc={}, days={};
-  WX.rows.filter(r=>r.settled).forEach(r=>{
-    const hy=r.m>=10?r.y:r.y-1;
-    acc[hy]=(acc[hy]||0)+r.rain; days[hy]=(days[hy]||0)+1;
-  });
-  const ys=Object.keys(acc).filter(y=>days[y]>=360).map(Number).sort();
-  if(!ys.length) return '<div class="why">Not enough data.</div>';
-  const vals=ys.map(y=>acc[y]);
-  const yh=Math.max(...vals)*1.1;
-  const x=scale(0,ys.length-1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
-  const bw=(W-PAD.l-PAD.r)/(ys.length+2);
-  const med=median(vals);
-  const bars=ys.map((yr,i)=>`<rect x="${x(i)-bw/2}" y="${y(acc[yr])}" width="${bw*.85}"
-    height="${H-PAD.b-y(acc[yr])}" fill="${acc[yr]<med?'#d29922':'#58a6ff'}" opacity=".8"/>`).join('');
-  const step=Math.ceil(ys.length/8);
-  const xt=ys.map((yr,i)=>({v:i,l:i%step===0?String(yr).slice(2)+'/'+String(yr+1).slice(2):''}));
+  const s=WX.seasonal_rain;
+  if(!s||!s.length) return '<div class="why">Not enough data.</div>';
+  const vals=s.map(o=>o.rain), med=median(vals), yh=Math.max(...vals)*1.12;
+  const x=scale(0,s.length-1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
+  const bw=(W-PAD.l-PAD.r)/(s.length+2);
+  const bars=s.map((o,i)=>`<rect x="${x(i)-bw/2}" y="${y(o.rain)}" width="${bw*.85}"
+    height="${H-PAD.b-y(o.rain)}" fill="${o.rain<med?'#d29922':'#58a6ff'}" opacity=".82"/>`).join('');
+  const step=Math.ceil(s.length/8);
+  const xt=s.map((o,i)=>({v:i,l:i%step===0?String(o.season).slice(2)+'/'+String(o.season+1).slice(2):''}));
   return svg(axes(x,y,0,yh,xt)+bars+
-    `<line class="grid" stroke="#3fb950" stroke-dasharray="4,4" x1="${PAD.l}" y1="${y(med)}"
+    `<line stroke="#3fb950" stroke-dasharray="4,4" x1="${PAD.l}" y1="${y(med)}"
       x2="${W-PAD.r}" y2="${y(med)}"/>
-     <text x="${W-PAD.r-4}" y="${y(med)-4}" text-anchor="end" fill="#3fb950">median ${fmt(med)} mm</text>`);
+     <text x="${W-PAD.r-4}" y="${y(med)-4}" text-anchor="end" fill="#3fb950">median ${fmt(med)} mm</text>`,
+    {pts:s.map((o,i)=>({k:i,v:o.rain,season:o.season})),x,y,
+     label:p=>`<b>${p.season}/${String(p.season+1).slice(2)}</b><br>${fmt(p.v)} mm
+       <br><span style="color:var(--tx3)">${p.v<med?'below':'above'} median</span>`});
 }
 function chartFrost(){
-  const yrs=new Set(WX.rows.filter(r=>r.settled).map(r=>r.y)).size||1;
-  const c=Array(12).fill(0);
-  WX.rows.filter(r=>r.settled&&r.tmin<=0).forEach(r=>c[r.m-1]++);
-  const per=c.map(v=>v/yrs);
-  const yh=Math.max(...per,1)*1.15;
+  const per=WX.monthly.map(m=>m.frost_nights);
+  const yh=Math.max(...per,1)*1.18;
   const x=scale(0,11,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
-  const bw=(W-PAD.l-PAD.r)/14;
+  const bw=(W-PAD.l-PAD.r)/15;
   const bars=per.map((v,i)=>`<rect x="${x(i)-bw/2}" y="${y(v)}" width="${bw}"
     height="${H-PAD.b-y(v)}" fill="#58a6ff" opacity=".8"/>`).join('');
-  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(1))+bars);
+  return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i,l})),v=>v.toFixed(1))+bars,
+    {pts:per.map((v,i)=>({k:i,v})),x,y,
+     label:p=>`<b>${MONTH[p.k]}</b><br>${p.v.toFixed(1)} frost nights per year`});
 }
 
 upDo(); render();
