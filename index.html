@@ -775,6 +775,18 @@ function staleBanner(meta){
 /* ============================================================ PRICES TAB */
 let PIDX=null, PMETA=null, PSER=null, priceId=null, priceYears=5, priceZoom=null;
 let LATEST=null, latestAll=false, latestSort='qty_t';
+/* Which of the three published prices drives the charts and statistics. The
+   bulletin gives a high, a low and a mode; the mode is where most of the
+   volume cleared, so it is the default, but the low is what you should plan
+   against if your grade is ordinary and the high if it is not. */
+let priceBasis='mode';
+const BASES={low:{i:2,label:'Low',ar:'الأدنى'},
+             mode:{i:1,label:'Mode',ar:'الأغلب'},
+             high:{i:3,label:'High',ar:'الأعلى'}};
+const SEAS_BASIS={low:1,mode:3,high:5};   // p10 / median / p90 columns
+function basisLabel(){ return BASES[priceBasis].label; }
+function setBasis(b){ priceBasis=b; SEASONAL_CACHE_BUST=Math.random(); renderPrices(); }
+let SEASONAL_CACHE_BUST=0;
 
 function latestFor(name){
   if(!LATEST) return null;
@@ -791,14 +803,15 @@ function snapshotCard(meta){
   if(!s) return '<div class="card"><h3>Latest bulletin</h3>'+
     '<div class="why">'+meta.name+' was not listed on '+LATEST.date+
     '. Items rotate seasonally, so a gap is normal out of season.</div></div>';
+  const shown=s[priceBasis]!=null?s[priceBasis]:s.mode;
   const vs=(s.week_median&&s.mode)?100*(s.mode-s.week_median)/s.week_median:null;
   return '<div class="card"><h3>Latest bulletin \u00b7 '+LATEST.date+'</h3>'+
    '<div class="why">'+(age>3?'<b>'+age+' days old.</b> ':'')+
    'What this item actually fetched on the most recent trading day, and how '+
    'that compares with the same week across previous years.</div>'+
    statGrid([
-    ['Mode', fmt(s.mode)+' <span class="u">'+priceUnit()+'</span>',
-     null, 'low '+fmt(s.low)+' \u00b7 high '+fmt(s.high)],
+    [basisLabel(), fmt(shown)+' <span class="u">'+priceUnit()+'</span>',
+     null, 'low '+fmt(s.low)+' \u00b7 mode '+fmt(s.mode)+' \u00b7 high '+fmt(s.high)],
     ['On the day before', s.change_pct!=null?(s.change_pct>0?'+':'')+s.change_pct+'%':'\u2014',
      s.change_pct==null?null:(s.change_pct>0?'var(--ok)':'var(--err)'),
      s.prev_mode!=null?'was '+fmt(s.prev_mode):''],
@@ -912,6 +925,12 @@ function drawPrices(el,meta){
   el.innerHTML=`
    ${staleBanner(PMETA)}
    <div class="card">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+     <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);flex:1">Showing</div>
+     ${Object.keys(BASES).map(b=>`<button class="btn ${priceBasis===b?'on':''}"
+       style="height:24px;padding:0 9px;font-size:10px"
+       onclick="setBasis('${b}')">${BASES[b].label}</button>`).join('')}
+    </div>
     <select class="wide" onchange="priceId=this.value;PSER=null;priceZoom=null;renderPrices()">
      ${cropGroups(mapped)}
      <optgroup label="${mapped.length?'Other bulletin items':'Bulletin items'}">
@@ -928,21 +947,21 @@ function drawPrices(el,meta){
       <code>--mapping data/item_mapping.csv</code> and commit the data folder.</div>`:''}
    </div>
 
-   ${snapshotCard(meta)}
-   ${latestListCard()}
-
    <div class="card"><h3>Price over time</h3>
-    <div class="why">Weekly median of the modal price (سعر الأغلب), with the
-     low-to-high band behind it. The band is grade spread on the same day, not
-     uncertainty.</div>
+    <div class="why">Weekly median of the ${basisLabel().toLowerCase()} price
+     (${BASES[priceBasis].ar}), with the low-to-high band behind it. The band is
+     grade spread on the same day, not uncertainty.</div>
     <div class="rng">${[1,3,5,11].map(y=>`<button class="btn ${(!priceZoom&&priceYears===y)?'on':''}"
       onclick="priceZoom=null;priceYears=${y};drawPrices(document.getElementById('pricesBody'),${JSON.stringify(meta).replace(/"/g,'&quot;')})">${y===11?'All':y+'y'}</button>`).join('')}
       ${priceZoom?`<button class="btn on" onclick="priceZoom=null;renderPrices()">✕ zoomed</button>`
                  :`<span style="font-size:10px;color:var(--tx3);align-self:center">drag to zoom</span>`}</div>
     ${chartWeekly()}
-    <div class="legend"><span><i style="background:#3fb950"></i>modal</span>
+    <div class="legend"><span><i style="background:#3fb950"></i>${basisLabel().toLowerCase()}</span>
      <span><i style="background:#1f6feb;opacity:.5"></i>low–high band</span></div>
    </div>
+
+   ${snapshotCard(meta)}
+   ${latestListCard()}
 
    <div class="card"><h3>Key numbers</h3>
     <div class="why">The things you would otherwise have to read off a chart
@@ -1047,8 +1066,9 @@ function chartWeekly(){
     ? all.filter(w=>weekStart(w[0]).getTime()>=priceZoom[0]&&weekStart(w[0]).getTime()<=priceZoom[1])
     : all.filter(w=>weekStart(w[0]).getTime()>=lastT-priceYears*365.25*DAY);
   if(rows.length<2) return '<div class="why">Nothing in this range.</div>';
+  const bi=BASES[priceBasis].i;
   const pts=rows.map(w=>({k:weekStart(w[0]).getTime(),key:w[0],
-    v:w[1],l:w[2],h:w[3],q:w[4],n:w[5]}));
+    v:w[bi],l:w[2],h:w[3],q:w[4],n:w[5]}));
   const t0=pts[0].k, t1=pts[pts.length-1].k;
   const yh=Math.max(...pts.map(p=>p.h??p.v))*1.05;
   const x=scale(t0,t1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
@@ -1063,14 +1083,15 @@ function chartWeekly(){
      <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.6"/>`,
     {pts,x,y,zoom:(a,b)=>{priceZoom=[a,b];renderPrices();},
      label:p=>`<b>${weekLabel(p.key)}</b><br>
-       modal ${fmt(p.v)} · ${fmt(p.l)}–${fmt(p.h)} ${priceUnit()}/kg<br>
+       ${basisLabel().toLowerCase()} ${fmt(p.v)} · range ${fmt(p.l)}–${fmt(p.h)} ${priceUnit()}/kg<br>
        ${p.q?fmt(p.q,1)+' t/day median · ':''}<span style="color:var(--tx3)">${p.n} days</span>`});
 }
 
 function chartSeasonal(){
   const s=PSER.seasonal;
   if(!s||s.length<10) return '<div class="why">Not enough data.</div>';
-  const pts=s.map(r=>({k:r[0],p10:r[1],p25:r[2],v:r[3],p75:r[4],p90:r[5],q:r[6],n:r[7]}));
+  const sb=SEAS_BASIS[priceBasis];
+  const pts=s.map(r=>({k:r[0],p10:r[1],p25:r[2],v:r[sb],p75:r[4],p90:r[5],q:r[6],n:r[7]}));
   const yh=Math.max(...pts.map(p=>p.p90))*1.08;
   const x=scale(0,52,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
   const poly=(a,b)=>pts.map(p=>`${x(p.k)},${y(p[a])}`).join(' ')+' '+
@@ -1392,6 +1413,16 @@ async function loadMonth(month){
   TBL.loading=false; renderTable();
 }
 
+/* Names present in the loaded month, commonest first, so the filter offers
+   real options rather than making you remember the Arabic. */
+function itemNames(){
+  if(!TBL.rows) return [];
+  const c={};
+  TBL.rows.forEach(function(r){ c[r.item]=(c[r.item]||0)+1; });
+  return Object.keys(c).map(function(k){return {name:k,n:c[k]};})
+    .sort(function(a,b){return b.n-a.n;});
+}
+
 function tableRows(){
   if(!TBL.rows) return [];
   let rows=TBL.rows;
@@ -1460,8 +1491,11 @@ function renderTable(){
     months.map(function(m){return '<option value="'+m+'"'+(m===TBL.month?' selected':'')+'>'+m+'</option>';}).join('')+
    '</select></div>'+
    '<div class="row"><label>Filter by item</label>'+
-   '<input style="width:150px" value="'+(TBL.item||'')+'" placeholder="\u0628\u0646\u062f\u0648\u0631\u0629" '+
-   'oninput="filterItem(this.value)"></div>'+
+   '<input list="tblItems" style="width:150px" value="'+(TBL.item||'')+'" '+
+   'placeholder="type or pick" oninput="filterItem(this.value)"></div>'+
+   '<datalist id="tblItems">'+itemNames().map(function(o){
+     return '<option value="'+o.name+'">'+o.name+' \u00b7 '+o.n+' rows</option>';
+   }).join('')+'</datalist>'+
    '<div class="rng" style="margin-top:8px">'+
    '<button class="btn" onclick="exportCSV(\'view\')">Export what I see</button>'+
    '<button class="btn" onclick="exportCSV(\'month\')">Export whole month</button>'+
@@ -1533,10 +1567,11 @@ function statGrid(items){
 /* ---- price: weekly rows regrouped into calendar years ---- */
 function byYear(weekly){
   const out={};
+  const bi=BASES[priceBasis].i;
   weekly.forEach(function(w){
     const s=weekStart(w[0]), Y=s.getUTCFullYear();
     const woy=Math.min(52,Math.floor((s.getTime()-Date.UTC(Y,0,1))/WEEK));
-    (out[Y]=out[Y]||[]).push({woy:woy,v:w[1],q:w[4],n:w[5],key:w[0]});
+    (out[Y]=out[Y]||[]).push({woy:woy,v:w[bi],q:w[4],n:w[5],key:w[0]});
   });
   Object.keys(out).forEach(function(y){ out[y].sort(function(a,b){return a.woy-b.woy;}); });
   return out;
@@ -1545,7 +1580,8 @@ function byYear(weekly){
 function priceStats(){
   const wk=PSER.weekly, ys=byYear(wk);
   const years=Object.keys(ys).map(Number).sort();
-  const vals=wk.map(function(w){return w[1];}).filter(function(v){return v!=null;});
+  const bi=BASES[priceBasis].i;
+  const vals=wk.map(function(w){return w[bi];}).filter(function(v){return v!=null;});
   const med=median(vals), p25=quantile(vals,.25), p75=quantile(vals,.75);
 
   // typical week-to-week move, as a share of level. Uses the median so one
@@ -1553,8 +1589,8 @@ function priceStats(){
   const moves=[];
   for(let i=1;i<wk.length;i++){
     if(wk[i][0]-wk[i-1][0]!==1) continue;
-    if(!wk[i-1][1]) continue;
-    moves.push(Math.abs(wk[i][1]-wk[i-1][1])/wk[i-1][1]);
+    if(!wk[i-1][bi]) continue;
+    moves.push(Math.abs(wk[i][bi]-wk[i-1][bi])/wk[i-1][bi]);
   }
   const vol=median(moves);
 
@@ -1584,13 +1620,14 @@ function priceStats(){
   const last=wk[wk.length-1];
   const lastD=weekStart(last[0]);
   const lastWoy=Math.min(52,Math.floor((lastD.getTime()-Date.UTC(lastD.getUTCFullYear(),0,1))/WEEK));
+  const nb=SEAS_BASIS[priceBasis];
   const norm=s.filter(function(r){return r[0]===lastWoy;})[0];
-  const vsNorm=(norm&&norm[3])?100*(last[1]-norm[3])/norm[3]:null;
+  const vsNorm=(norm&&norm[nb])?100*(last[bi]-norm[nb])/norm[nb]:null;
 
   const U=priceUnit();
   return {years:years, annual:annual, html:
    statGrid([
-    ['Median price', fmt(med)+' <span class="u">'+U+'</span>', null,
+    [basisLabel()+' price, median', fmt(med)+' <span class="u">'+U+'</span>', null,
      'middle half '+fmt(p25)+'\u2013'+fmt(p75)],
     ['Typical weekly move', vol!=null?(100*vol).toFixed(1)+'%':'\u2014', null,
      'median absolute change'],
