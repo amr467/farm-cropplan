@@ -35,7 +35,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);
 
 #tabs{display:flex;background:var(--sur);border-bottom:1px solid var(--bdr);
   flex-shrink:0;z-index:800}
-.tab{flex:1;height:36px;background:none;border:none;border-bottom:2px solid transparent;
+.tab{flex:1;height:36px;font-size:11.5px;background:none;border:none;border-bottom:2px solid transparent;
   color:var(--tx3);font-size:12px;font-family:inherit;cursor:pointer;letter-spacing:.2px}
 .tab.on{color:var(--ok);border-bottom-color:var(--ok);font-weight:600}
 
@@ -145,6 +145,7 @@ select{width:100%}
     <button class="tab on" id="tb-plan"    onclick="setView('plan')">Plan</button>
     <button class="tab"    id="tb-prices"  onclick="setView('prices')">Prices</button>
     <button class="tab"    id="tb-weather" onclick="setView('weather')">Weather</button>
+    <button class="tab"    id="tb-table"   onclick="setView('table')">Data</button>
     <button class="tab"    id="tb-money"   onclick="setView('money')">Money</button>
   </div>
 
@@ -166,6 +167,7 @@ select{width:100%}
 
   <div class="view" id="v-prices"><div class="scroll" id="pricesBody"></div></div>
   <div class="view" id="v-weather"><div class="scroll" id="weatherBody"></div></div>
+  <div class="view" id="v-table"><div class="scroll" id="tableBody"></div></div>
   <div class="view" id="v-money"><div class="scroll" id="moneyBody"></div></div>
 </div>
 <div class="tip" id="tip"></div>
@@ -617,13 +619,14 @@ function importJSON(ev){
 
 /* ============================================================ TABS */
 function setView(v){
-  ['plan','prices','weather','money'].forEach(k=>{
+  ['plan','prices','weather','table','money'].forEach(k=>{
     document.getElementById('v-'+k).classList.toggle('on',k===v);
     document.getElementById('tb-'+k).classList.toggle('on',k===v);
   });
   if(v==='plan') setTimeout(()=>map.invalidateSize(),50);
   if(v==='prices') renderPrices();
   if(v==='weather') renderWeather();
+  if(v==='table') renderTableTab();
   if(v==='money') renderMoney();
 }
 
@@ -736,6 +739,26 @@ function quantile(a,q){ if(!a.length)return null; const s=[...a].sort((p,q2)=>p-
    The app fetches data/ when served over HTTP. Opened from disk, fetch is
    blocked, so the file pickers stay as a fallback.                        */
 const DAY=864e5, WEEK=7*DAY;
+/* Weeks run Saturday to Friday, matching the Jordanian working week. Epoch day
+   0 was a Thursday, so aggregate.py adds WEEK_OFFSET before dividing by 7;
+   undo it here to recover the Saturday a bucket begins on. Labels always name
+   the week that STARTS on that date, never one already gone. */
+let WEEK_OFFSET=5;
+function weekStart(key){ return new Date((key*7-WEEK_OFFSET)*DAY); }
+function weekLabel(key){
+  const a=weekStart(key), b=new Date(a.getTime()+6*DAY);
+  const f=d=>d.getUTCDate()+' '+MONTH[d.getUTCMonth()];
+  return f(a)+'\u2013'+f(b)+' '+b.getUTCFullYear();
+}
+/* Week-of-year buckets are calendar positions, not dates, so name them by the
+   span they cover in a reference year: 'wk 34' alone means nothing. */
+function woyLabel(woy){
+  const a=new Date(Date.UTC(2001,0,1+woy*7)), b=new Date(a.getTime()+6*DAY);
+  const f=d=>d.getUTCDate()+' '+MONTH[d.getUTCMonth()];
+  return 'wk '+(woy+1)+' \u00b7 '+f(a)+'\u2013'+f(b);
+}
+function priceUnit(){ return settings.unitsPerJD==1000?'fils':'piastres'; }
+function isoDay(d){ return new Date(d).toISOString().slice(0,10); }
 async function getJSON(path){
   const r=await fetch(path,{cache:'no-cache'});
   if(!r.ok) throw new Error(path+' '+r.status);
@@ -802,9 +825,10 @@ function drawPrices(el,meta){
      ${meta.first} to ${meta.last}. Median ${fmt(meta.median_price)} fils/kg.
      ${PSER.members&&PSER.members.length>1?`Merged from ${PSER.members.length} bulletin names.`:''}
      <b>Wholesale at the Amman central market, not farmgate.</b></div>
-    ${!mapped.length?`<div class="gap">No crop mapping yet. Fill the crop_id
-      column in item_mapping.csv and re-run aggregate.py to merge variety
-      listings into crops.</div>`:''}
+    ${!mapped.length?`<div class="gap"><b>No crop tags in this data.</b>
+      data/prices_index.json has no crop field, so aggregate.py ran without
+      seeing item_mapping.csv. Re-run it with
+      <code>--mapping data/item_mapping.csv</code> and commit the data folder.</div>`:''}
    </div>
 
    <div class="card"><h3>Price over time</h3>
@@ -918,12 +942,13 @@ function ingestCSV(rows){
 function chartWeekly(){
   const all=PSER.weekly;
   if(!all||all.length<2) return '<div class="why">Not enough data.</div>';
-  const lastT=all[all.length-1][0]*WEEK;
+  const lastT=weekStart(all[all.length-1][0]).getTime();
   const rows=priceZoom
-    ? all.filter(w=>w[0]*WEEK>=priceZoom[0]&&w[0]*WEEK<=priceZoom[1])
-    : all.filter(w=>w[0]*WEEK>=lastT-priceYears*365.25*DAY);
+    ? all.filter(w=>weekStart(w[0]).getTime()>=priceZoom[0]&&weekStart(w[0]).getTime()<=priceZoom[1])
+    : all.filter(w=>weekStart(w[0]).getTime()>=lastT-priceYears*365.25*DAY);
   if(rows.length<2) return '<div class="why">Nothing in this range.</div>';
-  const pts=rows.map(w=>({k:w[0]*WEEK,v:w[1],l:w[2],h:w[3],q:w[4],n:w[5]}));
+  const pts=rows.map(w=>({k:weekStart(w[0]).getTime(),key:w[0],
+    v:w[1],l:w[2],h:w[3],q:w[4],n:w[5]}));
   const t0=pts[0].k, t1=pts[pts.length-1].k;
   const yh=Math.max(...pts.map(p=>p.h??p.v))*1.05;
   const x=scale(t0,t1,PAD.l,W-PAD.r), y=scale(0,yh,H-PAD.b,PAD.t);
@@ -937,8 +962,8 @@ function chartWeekly(){
     `<polygon points="${band}" fill="#1f6feb" opacity=".22"/>
      <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.6"/>`,
     {pts,x,y,zoom:(a,b)=>{priceZoom=[a,b];renderPrices();},
-     label:p=>`<b>week of ${new Date(p.k).toISOString().slice(0,10)}</b><br>
-       modal ${fmt(p.v)} · ${fmt(p.l)}–${fmt(p.h)} fils/kg<br>
+     label:p=>`<b>${weekLabel(p.key)}</b><br>
+       modal ${fmt(p.v)} · ${fmt(p.l)}–${fmt(p.h)} ${priceUnit()}/kg<br>
        ${p.q?fmt(p.q,1)+' t/day median · ':''}<span style="color:var(--tx3)">${p.n} days</span>`});
 }
 
@@ -956,9 +981,8 @@ function chartSeasonal(){
      <polygon points="${poly('p75','p25')}" fill="#3fb950" opacity=".22"/>
      <path d="${line}" fill="none" stroke="#3fb950" stroke-width="1.8"/>`,
     {pts,x,y,label:p=>{
-      const d=new Date(Date.UTC(2001,0,1+p.k*7));
-      return `<b>week ${p.k+1} · ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}</b><br>
-       median ${fmt(p.v)} fils/kg<br>
+      return `<b>${woyLabel(p.k)}</b><br>
+       median ${fmt(p.v)} ${priceUnit()}/kg<br>
        middle half ${fmt(p.p25)}–${fmt(p.p75)}<br>
        10–90% ${fmt(p.p10)}–${fmt(p.p90)}<br>
        <span style="color:var(--tx3)">${p.n} observations</span>`;}});
@@ -975,10 +999,8 @@ function chartArrivals(){
   const bars=pts.map(p=>`<rect x="${x(p.k)-bw/2}" y="${y(p.v)}" width="${bw*.85}"
     height="${H-PAD.b-y(p.v)}" fill="#a78bfa" opacity=".72"/>`).join('');
   return svg(axes(x,y,0,yh,MONTH.map((l,i)=>({v:i*52/12+2,l})))+bars,
-    {pts,x,y,label:p=>{
-      const d=new Date(Date.UTC(2001,0,1+p.k*7));
-      return `<b>week ${p.k+1} · ${MONTH[d.getUTCMonth()]}</b><br>
-        ${fmt(p.v,1)} tonnes/day median`;}});
+    {pts,x,y,label:p=>`<b>${woyLabel(p.k)}</b><br>
+        ${fmt(p.v,1)} tonnes/day median`});
 }
 
 /* ============================================================ WEATHER TAB */
@@ -1199,6 +1221,178 @@ function varietyCard(){
 }
 function setVariety(crop,sid){ settings.priceMap[crop]=sid; renderMoney(); }
 
+async function renderTableTab(){
+  if(!PIDX){
+    try{ PIDX=await getJSON('data/prices_index.json');
+         if(PIDX.week_offset!=null) WEEK_OFFSET=PIDX.week_offset; }
+    catch(e){
+      document.getElementById('tableBody').innerHTML=
+        '<div class="card"><div class="why">Needs the published site: browsers '+
+        'block local file requests, so this view cannot work from disk.</div></div>';
+      return;
+    }
+  }
+  renderTable();
+}
+
+/* ============================================================ DAILY TABLE
+   The weekly JSON the charts use holds medians only. Daily rows live in
+   data/observations/YYYY-MM.csv.gz, which the app does not normally touch
+   because loading eleven years of them would defeat the point of aggregating.
+   Here we fetch just the months asked for and gunzip them in the browser,
+   using DecompressionStream where available.
+
+   Everything shown is a raw observation, not a median, so the typos the
+   cleaner catches are visible here. That is deliberate: this view exists to
+   let you check the data rather than to present a tidied version of it.     */
+
+let TBL={rows:null, month:null, loading:false, item:'', sort:'date', desc:true};
+
+function monthOptions(){
+  if(!PIDX) return [];
+  const last=PIDX.series.reduce(function(a,s){return s.last>a?s.last:a;},'0000-00');
+  const first=PIDX.series.reduce(function(a,s){return s.first<a?s.first:a;},'9999-99');
+  const out=[]; let y=+last.slice(0,4), m=+last.slice(5,7);
+  const y0=+first.slice(0,4), m0=+first.slice(5,7);
+  while(y>y0||(y===y0&&m>=m0)){
+    out.push(String(y)+'-'+String(m).padStart(2,'0'));
+    m--; if(m===0){m=12;y--;}
+    if(out.length>200) break;
+  }
+  return out;
+}
+
+async function gunzip(buf){
+  if(typeof DecompressionStream==='function'){
+    const s=new Response(buf).body.pipeThrough(new DecompressionStream('gzip'));
+    return new Response(s).text();
+  }
+  throw new Error('This browser cannot decompress .gz. Use the CSV export '+
+                  'from a desktop browser instead.');
+}
+
+async function loadMonth(month){
+  TBL.loading=true; renderTable();
+  try{
+    const r=await fetch('data/observations/'+month+'.csv.gz',{cache:'no-cache'});
+    if(!r.ok) throw new Error('no data file for '+month);
+    const text=await gunzip(await r.arrayBuffer());
+    const rows=parseCSV(text);
+    TBL.rows=rows.map(function(o){
+      const lo=+o.price_low, md=+o.price_mode, hi=+o.price_high;
+      return {date:o.date, item:o.item, unit:o.unit,
+              low:isFinite(lo)?lo:null, mode:isFinite(md)?md:null,
+              high:isFinite(hi)?hi:null, qty:+o.quantity||null,
+              ok:(isFinite(lo)&&isFinite(md)&&isFinite(hi)&&lo<=md&&md<=hi)};
+    });
+    TBL.month=month; TBL.err=null;
+  }catch(e){ TBL.rows=null; TBL.err=e.message; }
+  TBL.loading=false; renderTable();
+}
+
+function tableRows(){
+  if(!TBL.rows) return [];
+  let rows=TBL.rows;
+  if(TBL.item) rows=rows.filter(function(r){return r.item.indexOf(TBL.item)>=0;});
+  const k=TBL.sort;
+  return rows.slice().sort(function(a,b){
+    let va=a[k], vb=b[k];
+    if(va==null) va=-Infinity; if(vb==null) vb=-Infinity;
+    if(va<vb) return TBL.desc?1:-1;
+    if(va>vb) return TBL.desc?-1:1;
+    return a.item<b.item?-1:1;
+  });
+}
+
+function sortBy(k){ if(TBL.sort===k) TBL.desc=!TBL.desc; else {TBL.sort=k;TBL.desc=true;} renderTable(); }
+function filterItem(v){ TBL.item=v.trim(); renderTable(); }
+
+function exportCSV(scope){
+  const rows=scope==='view'?tableRows():TBL.rows;
+  if(!rows||!rows.length) return;
+  const head=['date','item','unit','price_low','price_mode','price_high',
+              'quantity_t','passes_check'];
+  const body=rows.map(function(r){
+    return [r.date,'"'+r.item.replace(/"/g,'""')+'"',r.unit,
+            r.low==null?'':r.low, r.mode==null?'':r.mode,
+            r.high==null?'':r.high, r.qty==null?'':r.qty, r.ok?1:0].join(',');
+  });
+  const blob=new Blob(['\uFEFF'+head.join(',')+'\n'+body.join('\n')],
+                      {type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='gam-prices-'+TBL.month+(scope==='view'&&TBL.item?'-filtered':'')+'.csv';
+  a.click();
+}
+
+function renderTable(){
+  const el=document.getElementById('tableBody');
+  if(!el) return;
+  const months=monthOptions();
+  if(!months.length){
+    el.innerHTML='<div class="card"><div class="why">Load the Prices tab '+
+      'first so the app knows what date range exists.</div></div>';
+    return;
+  }
+  if(!TBL.month&&!TBL.loading){ loadMonth(months[0]); return; }
+
+  const rows=tableRows();
+  const bad=TBL.rows?TBL.rows.filter(function(r){return !r.ok;}).length:0;
+  const arrow=function(k){ return TBL.sort===k?(TBL.desc?' \u25be':' \u25b4'):''; };
+  const th=function(k,label,align){
+    return '<th onclick="sortBy(\''+k+'\')" style="cursor:pointer;text-align:'+
+      (align||'left')+'">'+label+arrow(k)+'</th>';
+  };
+
+  el.innerHTML=
+   '<div class="card"><h3>Daily observations</h3>'+
+   '<div class="why">Raw bulletin rows, one per item per day, straight from '+
+   'the archive. Not medians and not cleaned, so obvious typos are visible '+
+   'here rather than hidden. Rows failing the low \u2264 mode \u2264 high check '+
+   'are marked and are excluded from every chart.</div>'+
+   '<div class="row"><label>Month</label>'+
+   '<select style="width:130px" onchange="loadMonth(this.value)">'+
+    months.map(function(m){return '<option value="'+m+'"'+(m===TBL.month?' selected':'')+'>'+m+'</option>';}).join('')+
+   '</select></div>'+
+   '<div class="row"><label>Filter by item</label>'+
+   '<input style="width:150px" value="'+(TBL.item||'')+'" placeholder="\u0628\u0646\u062f\u0648\u0631\u0629" '+
+   'oninput="filterItem(this.value)"></div>'+
+   '<div class="rng" style="margin-top:8px">'+
+   '<button class="btn" onclick="exportCSV(\'view\')">Export what I see</button>'+
+   '<button class="btn" onclick="exportCSV(\'month\')">Export whole month</button>'+
+   '</div>'+
+   (TBL.loading?'<div class="why">Loading\u2026</div>':'')+
+   (TBL.err?'<div class="gap">'+TBL.err+'</div>':'')+
+   (TBL.rows?'<div class="why" style="margin-top:8px">'+fmt(rows.length)+
+     ' of '+fmt(TBL.rows.length)+' rows'+
+     (bad?', '+bad+' failing the price-order check':'')+'</div>':'')+
+   '</div>'+
+
+   (TBL.rows?'<div class="card" style="padding:0;overflow:hidden">'+
+    '<div style="max-height:60vh;overflow:auto;-webkit-overflow-scrolling:touch">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+    '<thead style="position:sticky;top:0;background:var(--sur2);z-index:2">'+
+    '<tr style="color:var(--tx3);font-size:9px;text-transform:uppercase;letter-spacing:.5px">'+
+    th('date','Date')+th('item','Item')+th('low','Low','right')+
+    th('mode','Mode','right')+th('high','High','right')+th('qty','Tonnes','right')+
+    '</tr></thead><tbody>'+
+    rows.slice(0,600).map(function(r){
+      return '<tr style="border-top:1px solid rgba(48,54,61,.5)'+
+        (r.ok?'':';background:#1f1a0d')+'">'+
+        '<td style="padding:5px 7px;color:var(--tx3);white-space:nowrap">'+r.date.slice(5)+'</td>'+
+        '<td style="padding:5px 7px">'+r.item+(r.ok?'':' <span style="color:var(--warn)">\u26a0</span>')+'</td>'+
+        '<td style="padding:5px 7px;text-align:right;font-variant-numeric:tabular-nums">'+(r.low==null?'\u2014':fmt(r.low))+'</td>'+
+        '<td style="padding:5px 7px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">'+(r.mode==null?'\u2014':fmt(r.mode))+'</td>'+
+        '<td style="padding:5px 7px;text-align:right;font-variant-numeric:tabular-nums">'+(r.high==null?'\u2014':fmt(r.high))+'</td>'+
+        '<td style="padding:5px 7px;text-align:right;font-variant-numeric:tabular-nums;color:var(--qty)">'+(r.qty==null?'\u2014':fmt(r.qty,2))+'</td>'+
+      '</tr>';
+    }).join('')+
+    '</tbody></table></div>'+
+    (rows.length>600?'<div class="note" style="padding:8px 10px">Showing the '+
+      'first 600 rows. Narrow the filter, or export to see everything.</div>':'')+
+   '</div>':'');
+}
+
 /* ============================================================ ANALYSIS
    Statistics and year-on-year views. Each earns its place by answering a
    question you would otherwise have to eyeball off a chart.               */
@@ -1235,9 +1429,9 @@ function statGrid(items){
 function byYear(weekly){
   const out={};
   weekly.forEach(function(w){
-    const t=w[0]*WEEK, d=new Date(t), Y=d.getUTCFullYear();
-    const woy=Math.min(52,Math.floor((t-Date.UTC(Y,0,1))/WEEK));
-    (out[Y]=out[Y]||[]).push({woy:woy,v:w[1],q:w[4],n:w[5]});
+    const s=weekStart(w[0]), Y=s.getUTCFullYear();
+    const woy=Math.min(52,Math.floor((s.getTime()-Date.UTC(Y,0,1))/WEEK));
+    (out[Y]=out[Y]||[]).push({woy:woy,v:w[1],q:w[4],n:w[5],key:w[0]});
   });
   Object.keys(out).forEach(function(y){ out[y].sort(function(a,b){return a.woy-b.woy;}); });
   return out;
@@ -1283,12 +1477,12 @@ function priceStats(){
 
   // latest week against its own historical norm
   const last=wk[wk.length-1];
-  const lastT=last[0]*WEEK, lastD=new Date(lastT);
-  const lastWoy=Math.min(52,Math.floor((lastT-Date.UTC(lastD.getUTCFullYear(),0,1))/WEEK));
+  const lastD=weekStart(last[0]);
+  const lastWoy=Math.min(52,Math.floor((lastD.getTime()-Date.UTC(lastD.getUTCFullYear(),0,1))/WEEK));
   const norm=s.filter(function(r){return r[0]===lastWoy;})[0];
   const vsNorm=(norm&&norm[3])?100*(last[1]-norm[3])/norm[3]:null;
 
-  const U=settings.unitsPerJD==1000?'fils':'piastres';
+  const U=priceUnit();
   return {years:years, annual:annual, html:
    statGrid([
     ['Median price', fmt(med)+' <span class="u">'+U+'</span>', null,
@@ -1306,7 +1500,7 @@ function priceStats(){
                    rho>0.4?'moves together, so season drives both':'weak link')],
     ['Latest vs its norm', vsNorm!=null?(vsNorm>0?'+':'')+vsNorm.toFixed(0)+'%':'\u2014',
      vsNorm==null?null:(vsNorm>0?'var(--ok)':'var(--err)'),
-     'week '+(lastWoy+1)+' against 11 years'],
+     'wk from '+isoDay(lastD)+' vs 11 years'],
    ])};
 }
 
@@ -1341,11 +1535,10 @@ function chartYearOverlay(){
   }).join('')+'</div>';
   return svg(axes(x,y,0,yh,MONTH.map(function(l,i){return {v:i*52/12+2,l:l};}))+paths,
     {pts:pts,x:x,y:y,label:function(p){
-      const d=new Date(Date.UTC(2001,0,1+p.k*7));
       const rows=Object.keys(p.all).sort().reverse().slice(0,12).map(function(Y){
         return '<span style="color:'+yearColour(+Y,shown)+'">'+Y+'</span> '+fmt(p.all[Y]);
       }).join('<br>');
-      return '<b>week '+(p.k+1)+' \u00b7 '+MONTH[d.getUTCMonth()]+'</b><br>'+rows;
+      return '<b>'+woyLabel(p.k)+'</b><br>'+rows;
     }})+legend;
 }
 
@@ -1367,15 +1560,14 @@ function chartPriceVolume(){
   return svg(axes(x,y,0,yh,xt)+fit+dots,
     {pts:s.map(function(r){return {k:r[6],v:r[3],w:r[0]};}),x:x,y:y,
      label:function(p){
-       const d=new Date(Date.UTC(2001,0,1+p.w*7));
-       return '<b>week '+(p.w+1)+' \u00b7 '+MONTH[d.getUTCMonth()]+'</b><br>'+
+       return '<b>'+woyLabel(p.w)+'</b><br>'+
          fmt(p.k,1)+' t/day at '+fmt(p.v);
      }});
 }
 
 function yearTable(st){
   if(!st.annual.length) return '';
-  const U=settings.unitsPerJD==1000?'fils':'piastres';
+  const U=priceUnit();
   const rows=st.annual.map(function(a,i){
     const prev=i?st.annual[i-1].m:null;
     const ch=prev?100*(a.m-prev)/prev:null;

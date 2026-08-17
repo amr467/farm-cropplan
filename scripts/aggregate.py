@@ -32,7 +32,7 @@ import json
 import statistics as stats
 import sys
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 EPOCH = date(1970, 1, 1)
@@ -55,9 +55,20 @@ def r(x, n=1):
     return None if x is None else round(x, n)
 
 
+# Weeks start Saturday, matching the Jordanian working week. Epoch day 0 was a
+# Thursday, so a bare //7 would bucket Thursday-to-Wednesday and label each
+# week by a day two before it began. The +5 shift moves the boundary to
+# Saturday; WEEK_OFFSET lets the app undo it to recover the real date.
+WEEK_OFFSET = 5
+
 def iso_week_key(d):
-    """Days since epoch floored to a week. Matches the app's bucketing."""
-    return (d - EPOCH).days // 7
+    """Days since epoch floored to a Saturday-start week."""
+    return ((d - EPOCH).days + WEEK_OFFSET) // 7
+
+
+def week_start(key):
+    """The Saturday that begins bucket `key`."""
+    return EPOCH + timedelta(days=key * 7 - WEEK_OFFSET)
 
 
 def load_mapping(path):
@@ -143,12 +154,15 @@ def build_prices(args, outdir):
         weeks = sorted(wk)
         weekly = [[w, r(median(wk[w]["m"])), r(median(wk[w]["l"])),
                    r(median(wk[w]["h"])), r(median(wk[w]["q"]), 2),
-                   len(wk[w]["m"])] for w in weeks]
+                   len(wk[w]["m"]), week_start(w).isoformat()] for w in weeks]
 
         # ---- seasonal profile: week of year across all years
+        # Week of year taken from the Saturday-aligned week start, so the
+        # seasonal profile and the time series agree on where a week begins.
         soy = defaultdict(lambda: {"m": [], "q": []})
         for d, mode, lo, hi, q in rows:
-            woy = min(52, (d.timetuple().tm_yday - 1) // 7)
+            ws = week_start(iso_week_key(d))
+            woy = min(52, (ws.timetuple().tm_yday - 1) // 7)
             soy[woy]["m"].append(mode)
             if q:
                 soy[woy]["q"].append(q)
@@ -168,7 +182,8 @@ def build_prices(args, outdir):
             "members": [key],
             "first": rows[0][0].isoformat(), "last": rows[-1][0].isoformat(),
             "days": days,
-            "weekly_cols": ["week", "mode", "low", "high", "qty_t", "n"],
+            "weekly_cols": ["week", "mode", "low", "high", "qty_t", "n",
+                            "week_start"],
             "weekly": weekly,
             "seasonal_cols": ["week_of_year", "p10", "p25", "median",
                               "p75", "p90", "qty_t", "n"],
@@ -187,9 +202,9 @@ def build_prices(args, outdir):
         })
 
     (outdir / "prices_index.json").write_text(
-        json.dumps({"epoch_days_per_week": 7, "unit": "fils per kg",
+        json.dumps({"week_offset": WEEK_OFFSET, "week_starts": "Saturday",
                     "note": "Wholesale at the Greater Amman central market. "
-                            "NOT farmgate.",
+                            "NOT farmgate. Weeks run Saturday to Friday.",
                     "series": index}, separators=(",", ":"), ensure_ascii=False),
         encoding="utf-8")
 
