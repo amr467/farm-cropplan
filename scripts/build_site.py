@@ -107,6 +107,17 @@ def main():
         if src.exists():
             shutil.copy(src, data / name)
 
+    # The Data tab fetches these directly and gunzips them in the browser, so
+    # they have to be in the deployed artifact, not just in the repo. Roughly
+    # 3 MB total and nothing downloads until a month is actually requested.
+    obs_out = data / "observations"
+    if obs_out.exists():
+        shutil.rmtree(obs_out)
+    shutil.copytree(obs, obs_out)
+    n_obs = len(list(obs_out.glob("*.csv.gz")))
+    print(f"  copied {n_obs} monthly observation files "
+          f"({sum(f.stat().st_size for f in obs_out.iterdir())/1024/1024:.1f} MB)")
+
     (build / ".nojekyll").touch()      # stop Pages ignoring files
     state = root / "data" / "observations" / "_state.json"
     meta = {"built": datetime.now().isoformat(timespec="seconds")}

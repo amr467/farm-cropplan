@@ -208,6 +208,45 @@ def build_prices(args, outdir):
                     "series": index}, separators=(",", ":"), ensure_ascii=False),
         encoding="utf-8")
 
+    # ---- latest bulletin, every item, as its own small file. The Prices tab
+    # shows this without touching the monthly archives, so the common case
+    # ("what did the market do today") costs one small request.
+    latest_day = max((d for rows in series.values() for d, *_ in rows),
+                     default=None)
+    if latest_day:
+        prev_days = sorted({d for rows in series.values() for d, *_ in rows})
+        prev_day = prev_days[-2] if len(prev_days) > 1 else None
+        snapshot = []
+        for key, rows in series.items():
+            today = [r for r in rows if r[0] == latest_day]
+            if not today:
+                continue
+            d, mode, lo, hi, q = today[0]
+            before = [r for r in rows if r[0] == prev_day] if prev_day else []
+            pm = before[0][1] if before else None
+            # where does today sit against this week's own history?
+            woy = min(52, (week_start(iso_week_key(d)).timetuple().tm_yday - 1) // 7)
+            hist = [m for dd, m, *_ in rows
+                    if dd != latest_day
+                    and min(52, (week_start(iso_week_key(dd)).timetuple().tm_yday - 1) // 7) == woy]
+            snapshot.append({
+                "item": key, "crop": mapping.get(key),
+                "low": r(lo), "mode": r(mode), "high": r(hi), "qty_t": r(q, 2),
+                "prev_mode": r(pm),
+                "change_pct": r(100 * (mode - pm) / pm, 1) if pm else None,
+                "week_median": r(median(hist)) if len(hist) >= 4 else None,
+                "week_n": len(hist),
+            })
+        snapshot.sort(key=lambda s: -(s["qty_t"] or 0))
+        (outdir / "latest.json").write_text(json.dumps({
+            "date": latest_day.isoformat(),
+            "previous": prev_day.isoformat() if prev_day else None,
+            "note": "Most recent bulletin, every listed item. Wholesale at the "
+                    "Greater Amman central market, not farmgate.",
+            "items": snapshot,
+        }, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
+        print(f"Wrote latest.json for {latest_day} ({len(snapshot)} items)")
+
     total = sum(f.stat().st_size for f in pdir.glob("*.json"))
     print(f"Wrote {len(index)} series, {total/1024:.0f} KB total, "
           f"largest {max((f.stat().st_size for f in pdir.glob('*.json')), default=0)/1024:.0f} KB")

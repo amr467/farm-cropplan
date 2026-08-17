@@ -774,6 +774,102 @@ function staleBanner(meta){
 
 /* ============================================================ PRICES TAB */
 let PIDX=null, PMETA=null, PSER=null, priceId=null, priceYears=5, priceZoom=null;
+let LATEST=null, latestAll=false, latestSort='qty_t';
+
+function latestFor(name){
+  if(!LATEST) return null;
+  return LATEST.items.filter(function(i){return i.item===name;})[0]||null;
+}
+
+/* Today's bulletin for the selected item, against its own history for this
+   week of the year. A price means little without knowing whether it is high
+   or low for the time of year. */
+function snapshotCard(meta){
+  if(!LATEST) return '';
+  const s=latestFor(meta.name);
+  const age=Math.round((Date.now()-Date.parse(LATEST.date))/DAY);
+  if(!s) return '<div class="card"><h3>Latest bulletin</h3>'+
+    '<div class="why">'+meta.name+' was not listed on '+LATEST.date+
+    '. Items rotate seasonally, so a gap is normal out of season.</div></div>';
+  const vs=(s.week_median&&s.mode)?100*(s.mode-s.week_median)/s.week_median:null;
+  return '<div class="card"><h3>Latest bulletin \u00b7 '+LATEST.date+'</h3>'+
+   '<div class="why">'+(age>3?'<b>'+age+' days old.</b> ':'')+
+   'What this item actually fetched on the most recent trading day, and how '+
+   'that compares with the same week across previous years.</div>'+
+   statGrid([
+    ['Mode', fmt(s.mode)+' <span class="u">'+priceUnit()+'</span>',
+     null, 'low '+fmt(s.low)+' \u00b7 high '+fmt(s.high)],
+    ['On the day before', s.change_pct!=null?(s.change_pct>0?'+':'')+s.change_pct+'%':'\u2014',
+     s.change_pct==null?null:(s.change_pct>0?'var(--ok)':'var(--err)'),
+     s.prev_mode!=null?'was '+fmt(s.prev_mode):''],
+    ['Against this week historically', vs!=null?(vs>0?'+':'')+vs.toFixed(0)+'%':'\u2014',
+     vs==null?null:(vs>0?'var(--ok)':'var(--err)'),
+     s.week_median!=null?'norm '+fmt(s.week_median)+' from '+s.week_n+' obs':'too few years'],
+    ['Arrivals', s.qty_t!=null?fmt(s.qty_t,1)+' <span class="u">t</span>':'\u2014',
+     null, 'this item, that day'],
+   ])+'</div>';
+}
+
+function latestListCard(){
+  if(!LATEST) return '';
+  const items=LATEST.items.slice().sort(function(a,b){
+    const va=a[latestSort], vb=b[latestSort];
+    if(va==null) return 1; if(vb==null) return -1;
+    return latestSort==='item'?(va<vb?-1:1):vb-va;
+  });
+  const show=latestAll?items:items.slice(0,15);
+  return '<div class="card"><h3>Whole market, '+LATEST.date+'</h3>'+
+   '<div class="why">Every item the bulletin listed that day, so you can scan '+
+   'the market rather than one crop at a time. Change is against the previous '+
+   'trading day.</div>'+
+   '<div class="rng">'+
+    [['qty_t','Volume'],['mode','Price'],['change_pct','Movers'],['item','Name']]
+      .map(function(o){return '<button class="btn '+(latestSort===o[0]?'on':'')+
+        '" onclick="latestSort=\''+o[0]+'\';renderPrices()">'+o[1]+'</button>';}).join('')+
+    '<button class="btn" onclick="exportLatest()">Export CSV</button></div>'+
+   '<div style="max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch;margin-top:8px">'+
+   '<table style="width:100%;border-collapse:collapse;font-size:11px">'+
+   '<thead style="position:sticky;top:0;background:var(--sur2)">'+
+   '<tr style="color:var(--tx3);font-size:9px;text-transform:uppercase;letter-spacing:.5px">'+
+   '<th style="text-align:left;padding:4px 6px">Item</th>'+
+   '<th style="text-align:right;padding:4px 6px">Mode</th>'+
+   '<th style="text-align:right;padding:4px 6px">Chg</th>'+
+   '<th style="text-align:right;padding:4px 6px">Tonnes</th></tr></thead><tbody>'+
+   show.map(function(i){
+     const c=i.change_pct;
+     return '<tr style="border-top:1px solid rgba(48,54,61,.5)">'+
+      '<td style="padding:5px 6px">'+i.item+
+        (i.crop?' <span class="u">'+i.crop.replace(/_/g,' ')+'</span>':'')+'</td>'+
+      '<td style="padding:5px 6px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">'+fmt(i.mode)+'</td>'+
+      '<td style="padding:5px 6px;text-align:right;font-variant-numeric:tabular-nums;color:'+
+        (c==null?'var(--tx3)':(c>0?'var(--ok)':(c<0?'var(--err)':'var(--tx3)')))+'">'+
+        (c==null?'\u2014':(c>0?'+':'')+c+'%')+'</td>'+
+      '<td style="padding:5px 6px;text-align:right;font-variant-numeric:tabular-nums;color:var(--qty)">'+
+        (i.qty_t==null?'\u2014':fmt(i.qty_t,1))+'</td></tr>';
+   }).join('')+'</tbody></table></div>'+
+   (items.length>show.length?'<button class="btn" style="margin-top:8px;width:100%" '+
+     'onclick="latestAll=true;renderPrices()">Show all '+items.length+' items</button>':'')+
+   '</div>';
+}
+
+function exportLatest(){
+  if(!LATEST) return;
+  const head=['date','item','crop','price_low','price_mode','price_high',
+              'quantity_t','prev_mode','change_pct','week_median_historical'];
+  const body=LATEST.items.map(function(i){
+    return [LATEST.date,'"'+i.item.replace(/"/g,'""')+'"',i.crop||'',
+            i.low==null?'':i.low, i.mode==null?'':i.mode, i.high==null?'':i.high,
+            i.qty_t==null?'':i.qty_t, i.prev_mode==null?'':i.prev_mode,
+            i.change_pct==null?'':i.change_pct,
+            i.week_median==null?'':i.week_median].join(',');
+  });
+  const blob=new Blob(['\uFEFF'+head.join(',')+'\n'+body.join('\n')],
+                      {type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='gam-latest-'+LATEST.date+'.csv';
+  a.click();
+}
 
 async function renderPrices(){
   const el=document.getElementById('pricesBody');
@@ -782,6 +878,7 @@ async function renderPrices(){
     try{
       PIDX=await getJSON('data/prices_index.json');
       try{ PMETA=await getJSON('data/meta.json'); }catch(e){}
+      try{ LATEST=await getJSON('data/latest.json'); }catch(e){}
     }catch(e){
       el.innerHTML=`<div class="card"><h3>Price history</h3>
         <div class="why">Could not load <code>data/prices_index.json</code>.
@@ -830,6 +927,9 @@ function drawPrices(el,meta){
       seeing item_mapping.csv. Re-run it with
       <code>--mapping data/item_mapping.csv</code> and commit the data folder.</div>`:''}
    </div>
+
+   ${snapshotCard(meta)}
+   ${latestListCard()}
 
    <div class="card"><h3>Price over time</h3>
     <div class="why">Weekly median of the modal price (سعر الأغلب), with the
@@ -1246,7 +1346,8 @@ async function renderTableTab(){
    cleaner catches are visible here. That is deliberate: this view exists to
    let you check the data rather than to present a tidied version of it.     */
 
-let TBL={rows:null, month:null, loading:false, item:'', sort:'date', desc:true};
+let TBL={rows:null, month:null, loading:false, tried:false,
+         item:'', sort:'date', desc:true};
 
 function monthOptions(){
   if(!PIDX) return [];
@@ -1272,7 +1373,7 @@ async function gunzip(buf){
 }
 
 async function loadMonth(month){
-  TBL.loading=true; renderTable();
+  TBL.loading=true; TBL.month=month; renderTable();
   try{
     const r=await fetch('data/observations/'+month+'.csv.gz',{cache:'no-cache'});
     if(!r.ok) throw new Error('no data file for '+month);
@@ -1286,7 +1387,8 @@ async function loadMonth(month){
               ok:(isFinite(lo)&&isFinite(md)&&isFinite(hi)&&lo<=md&&md<=hi)};
     });
     TBL.month=month; TBL.err=null;
-  }catch(e){ TBL.rows=null; TBL.err=e.message; }
+  }catch(e){ TBL.rows=null; TBL.err=e.message+
+    '. If this says 404, the build has not copied data/observations yet.'; }
   TBL.loading=false; renderTable();
 }
 
@@ -1334,7 +1436,10 @@ function renderTable(){
       'first so the app knows what date range exists.</div></div>';
     return;
   }
-  if(!TBL.month&&!TBL.loading){ loadMonth(months[0]); return; }
+  /* Only auto-load once. The earlier version retried whenever month was
+     unset, and since a failed fetch leaves it unset, it looped forever and
+     showed "Loading" with no error. */
+  if(!TBL.month&&!TBL.loading&&!TBL.tried){ TBL.tried=true; loadMonth(months[0]); return; }
 
   const rows=tableRows();
   const bad=TBL.rows?TBL.rows.filter(function(r){return !r.ok;}).length:0;
